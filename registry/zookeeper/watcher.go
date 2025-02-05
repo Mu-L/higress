@@ -50,8 +50,6 @@ type watcher struct {
 	RegistryType       provider.ServiceRegistryType `json:"registry_type"`
 	Status             provider.WatcherStatus       `json:"status"`
 	serviceRemaind     *atomic.Int32
-	updateHandler      provider.ServiceUpdateHandler
-	readyHandler       provider.ReadyHandler
 	cache              memory.Cache
 	mutex              *sync.Mutex
 	stop               chan struct{}
@@ -103,27 +101,6 @@ func NewWatcher(cache memory.Cache, opts ...WatcherOption) (provider.Watcher, er
 		log.Info("connect zk error")
 		return nil, errors.New("connect zk error")
 	}
-	connectEvent := make(chan zk.Event, 2)
-	newClient.RegisterEvent("", connectEvent)
-	connectTimer := time.NewTimer(timeout)
-	connectTimout := false
-FOR:
-	for {
-		select {
-		case ev := <-connectEvent:
-			if ev.State == zk.StateConnected {
-				break FOR
-			}
-		case <-connectTimer.C:
-			connectTimout = true
-			break FOR
-		}
-	}
-	if connectTimout {
-		return nil, errors.New("connect zk timeout")
-	}
-	log.Info("zk connected")
-	newClient.UnregisterEvent("", connectEvent)
 	w.reconnectCh = newClient.Reconnect()
 	w.zkClient = newClient
 	go func() {
@@ -264,7 +241,7 @@ func (w *watcher) fetchAllServices(firstFetch ...bool) error {
 			case SpringCloudService:
 				serviceConfig.UrlIndex = path.Join(serviceInfo.rootPath, serviceInfo.service)
 			default:
-				return errors.New("unkown type")
+				return errors.New("unknown type")
 			}
 			serviceConfigs = append(serviceConfigs, serviceConfig)
 		}
@@ -298,7 +275,7 @@ func (w *watcher) ListenService() {
 						}
 						log.Errorf("[Zookeeper][ListenService] Get children of path zkRootPath with watcher failed, err:%v, index:%s", err, listIndex.UrlIndex)
 
-						// May be the provider does not ready yet, sleep failTimes * ConnDelay senconds to wait
+						// May be the provider does not ready yet, sleep failTimes * ConnDelay seconds to wait
 						after := time.After(timeSecondDuration(failTimes * ConnDelay))
 						select {
 						case <-after:
@@ -354,13 +331,14 @@ func (w *watcher) DataChange(eventType Event) bool {
 		se := w.generateServiceEntry(w.serviceEntry[host])
 
 		w.seMux.Unlock()
-		w.cache.UpdateServiceEntryWrapper(host, &memory.ServiceEntryWrapper{
+		w.cache.UpdateServiceWrapper(host, &memory.ServiceWrapper{
 			ServiceName:  host,
 			ServiceEntry: se,
 			Suffix:       "zookeeper",
 			RegistryType: w.Type,
+			RegistryName: w.Name,
 		})
-		w.updateHandler()
+		w.UpdateService()
 	} else if eventType.Action == EventTypeDel {
 		w.seMux.Lock()
 		value, ok := w.serviceEntry[host]
@@ -381,17 +359,18 @@ func (w *watcher) DataChange(eventType Event) bool {
 		//todo update
 		if len(se.Endpoints) == 0 {
 			if !w.keepStaleWhenEmpty {
-				w.cache.DeleteServiceEntryWrapper(host)
+				w.cache.DeleteServiceWrapper(host)
 			}
 		} else {
-			w.cache.UpdateServiceEntryWrapper(host, &memory.ServiceEntryWrapper{
+			w.cache.UpdateServiceWrapper(host, &memory.ServiceWrapper{
 				ServiceName:  host,
 				ServiceEntry: se,
 				Suffix:       "zookeeper",
 				RegistryType: w.Type,
+				RegistryName: w.Name,
 			})
 		}
-		w.updateHandler()
+		w.UpdateService()
 	}
 	return true
 }
@@ -407,7 +386,7 @@ func (w *watcher) GetInterfaceConfig(event Event) (string, *InterfaceConfig, err
 	}
 }
 
-func (w *watcher) GetSpringCloudConfig(intefaceName string, content []byte) (string, *InterfaceConfig, error) {
+func (w *watcher) GetSpringCloudConfig(interfaceName string, content []byte) (string, *InterfaceConfig, error) {
 	var instance SpringCloudInstance
 	err := json.Unmarshal(content, &instance)
 	if err != nil {
@@ -415,7 +394,7 @@ func (w *watcher) GetSpringCloudConfig(intefaceName string, content []byte) (str
 		return "", nil, err
 	}
 	var config InterfaceConfig
-	host := intefaceName
+	host := interfaceName
 	config.Host = host
 	config.Protocol = common.HTTP.String()
 	if len(instance.Payload.Metadata) > 0 && instance.Payload.Metadata["protocol"] != "" {
@@ -583,25 +562,27 @@ func (w *watcher) ChildToServiceEntry(children []string, interfaceName, zkPath s
 				if !reflect.DeepEqual(value, config) {
 					w.serviceEntry[host] = config
 					//todo update or create serviceentry
-					w.cache.UpdateServiceEntryWrapper(host, &memory.ServiceEntryWrapper{
+					w.cache.UpdateServiceWrapper(host, &memory.ServiceWrapper{
 						ServiceName:  host,
 						ServiceEntry: se,
 						Suffix:       "zookeeper",
 						RegistryType: w.Type,
+						RegistryName: w.Name,
 					})
 				}
 			} else {
 				w.serviceEntry[host] = config
-				w.cache.UpdateServiceEntryWrapper(host, &memory.ServiceEntryWrapper{
+				w.cache.UpdateServiceWrapper(host, &memory.ServiceWrapper{
 					ServiceName:  host,
 					ServiceEntry: se,
 					Suffix:       "zookeeper",
 					RegistryType: w.Type,
+					RegistryName: w.Name,
 				})
 			}
 		}
 		w.seMux.Unlock()
-		w.updateHandler()
+		w.UpdateService()
 	}
 }
 
@@ -645,7 +626,7 @@ func (w *watcher) DubboChildToServiceEntry(serviceEntry map[string]InterfaceConf
 }
 
 func (w *watcher) generateServiceEntry(config InterfaceConfig) *v1alpha3.ServiceEntry {
-	portList := make([]*v1alpha3.Port, 0)
+	portList := make([]*v1alpha3.ServicePort, 0)
 	endpoints := make([]*v1alpha3.WorkloadEntry, 0)
 
 	for _, service := range config.Endpoints {
@@ -654,7 +635,7 @@ func (w *watcher) generateServiceEntry(config InterfaceConfig) *v1alpha3.Service
 			protocol = common.ParseProtocol(service.Metadata[PROTOCOL])
 		}
 		portNumber, _ := strconv.Atoi(service.Port)
-		port := &v1alpha3.Port{
+		port := &v1alpha3.ServicePort{
 			Name:     protocol.String(),
 			Number:   uint32(portNumber),
 			Protocol: protocol.String(),
@@ -701,8 +682,8 @@ func (w *watcher) Run() {
 		select {
 		case <-ticker.C:
 			var needNewFetch bool
-			if w.IsReady() {
-				w.readyHandler(true)
+			if w.watcherReady() {
+				w.Ready(true)
 				needNewFetch = true
 			}
 			if firstFetchErr != nil || needNewFetch {
@@ -731,17 +712,15 @@ func (w *watcher) Stop() {
 
 	w.seMux.Lock()
 	for key := range w.serviceEntry {
-		w.cache.DeleteServiceEntryWrapper(key)
+		w.cache.DeleteServiceWrapper(key)
 	}
-	w.updateHandler()
+	w.UpdateService()
 	w.seMux.Unlock()
 
-	w.stop <- struct{}{}
-	w.Done <- struct{}{}
 	close(w.stop)
 	close(w.Done)
 	w.zkClient.Close()
-	w.readyHandler(false)
+	w.Ready(false)
 }
 
 func (w *watcher) IsHealthy() bool {
@@ -752,15 +731,7 @@ func (w *watcher) GetRegistryType() string {
 	return w.RegistryType.String()
 }
 
-func (w *watcher) AppendServiceUpdateHandler(f func()) {
-	w.updateHandler = f
-}
-
-func (w *watcher) ReadyHandler(f func(bool)) {
-	w.readyHandler = f
-}
-
-func (w *watcher) IsReady() bool {
+func (w *watcher) watcherReady() bool {
 	if w.serviceRemaind == nil {
 		return true
 	}

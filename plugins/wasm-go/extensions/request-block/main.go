@@ -19,9 +19,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tetratelabs/proxy-wasm-go-sdk/proxywasm"
-	"github.com/tetratelabs/proxy-wasm-go-sdk/proxywasm/types"
+	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm"
+	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm/types"
 	"github.com/tidwall/gjson"
+	regexp "github.com/wasilibs/go-re2"
 
 	"github.com/alibaba/higress/plugins/wasm-go/pkg/wrapper"
 )
@@ -36,12 +37,14 @@ func main() {
 }
 
 type RequestBlockConfig struct {
-	blockedCode    uint32
-	blockedMessage string
-	caseSensitive  bool
-	blockUrls      []string
-	blockHeaders   []string
-	blockBodys     []string
+	blockedCode      uint32
+	blockedMessage   string
+	caseSensitive    bool
+	blockUrls        []string
+	blockExactUrls   []string
+	blockHeaders     []string
+	blockBodies      []string
+	blockRegExpArray []*regexp.Regexp
 }
 
 func parseConfig(json gjson.Result, config *RequestBlockConfig, log wrapper.Log) error {
@@ -64,6 +67,30 @@ func parseConfig(json gjson.Result, config *RequestBlockConfig, log wrapper.Log)
 			config.blockUrls = append(config.blockUrls, strings.ToLower(url))
 		}
 	}
+	for _, item := range json.Get("block_exact_urls").Array() {
+		url := item.String()
+		if url == "" {
+			continue
+		}
+		if config.caseSensitive {
+			config.blockExactUrls = append(config.blockExactUrls, url)
+		} else {
+			config.blockExactUrls = append(config.blockExactUrls, strings.ToLower(url))
+		}
+	}
+	for _, item := range json.Get("block_regexp_urls").Array() {
+		regexpUrl := item.String()
+		if regexpUrl == "" {
+			continue
+		}
+		if config.caseSensitive {
+			reg := regexp.MustCompile(regexpUrl)
+			config.blockRegExpArray = append(config.blockRegExpArray, reg)
+		} else {
+			reg := regexp.MustCompile(strings.ToLower(regexpUrl))
+			config.blockRegExpArray = append(config.blockRegExpArray, reg)
+		}
+	}
 	for _, item := range json.Get("block_headers").Array() {
 		header := item.String()
 		if header == "" {
@@ -75,19 +102,19 @@ func parseConfig(json gjson.Result, config *RequestBlockConfig, log wrapper.Log)
 			config.blockHeaders = append(config.blockHeaders, strings.ToLower(header))
 		}
 	}
-	for _, item := range json.Get("block_bodys").Array() {
+	for _, item := range json.Get("block_bodies").Array() {
 		body := item.String()
 		if body == "" {
 			continue
 		}
 		if config.caseSensitive {
-			config.blockBodys = append(config.blockBodys, body)
+			config.blockBodies = append(config.blockBodies, body)
 		} else {
-			config.blockBodys = append(config.blockBodys, strings.ToLower(body))
+			config.blockBodies = append(config.blockBodies, strings.ToLower(body))
 		}
 	}
 	if len(config.blockUrls) == 0 && len(config.blockHeaders) == 0 &&
-		len(config.blockBodys) == 0 {
+		len(config.blockBodies) == 0 {
 		return errors.New("there is no block rules")
 	}
 	return nil
@@ -103,9 +130,21 @@ func onHttpRequestHeaders(ctx wrapper.HttpContext, config RequestBlockConfig, lo
 		if !config.caseSensitive {
 			requestUrl = strings.ToLower(requestUrl)
 		}
+		for _, blockExactUrl := range config.blockExactUrls {
+			if requestUrl == blockExactUrl {
+				proxywasm.SendHttpResponseWithDetail(config.blockedCode, "request-block.url_blocked.exact", nil, []byte(config.blockedMessage), -1)
+				return types.ActionContinue
+			}
+		}
 		for _, blockUrl := range config.blockUrls {
 			if strings.Contains(requestUrl, blockUrl) {
-				proxywasm.SendHttpResponse(config.blockedCode, nil, []byte(config.blockedMessage), -1)
+				proxywasm.SendHttpResponseWithDetail(config.blockedCode, "request-block.url_blocked.keyword", nil, []byte(config.blockedMessage), -1)
+				return types.ActionContinue
+			}
+		}
+		for _, regExpObj := range config.blockRegExpArray {
+			if regExpObj.MatchString(requestUrl) {
+				proxywasm.SendHttpResponseWithDetail(config.blockedCode, "request-block.url_blocked.regexp", nil, []byte(config.blockedMessage), -1)
 				return types.ActionContinue
 			}
 		}
@@ -126,25 +165,27 @@ func onHttpRequestHeaders(ctx wrapper.HttpContext, config RequestBlockConfig, lo
 		}
 		for _, blockHeader := range config.blockHeaders {
 			if strings.Contains(headerStr, blockHeader) {
-				proxywasm.SendHttpResponse(config.blockedCode, nil, []byte(config.blockedMessage), -1)
+				proxywasm.SendHttpResponseWithDetail(config.blockedCode, "request-block.body_blocked", nil, []byte(config.blockedMessage), -1)
 				return types.ActionContinue
 			}
 		}
 	}
-	if len(config.blockBodys) == 0 {
+	if len(config.blockBodies) == 0 {
 		ctx.DontReadRequestBody()
 	}
 	return types.ActionContinue
 }
 
 func onHttpRequestBody(ctx wrapper.HttpContext, config RequestBlockConfig, body []byte, log wrapper.Log) types.Action {
+	log.Infof("My request-block body: %s\n", string(body))
 	bodyStr := string(body)
+
 	if !config.caseSensitive {
 		bodyStr = strings.ToLower(bodyStr)
 	}
-	for _, blockBody := range config.blockBodys {
+	for _, blockBody := range config.blockBodies {
 		if strings.Contains(bodyStr, blockBody) {
-			proxywasm.SendHttpResponse(config.blockedCode, nil, []byte(config.blockedMessage), -1)
+			proxywasm.SendHttpResponseWithDetail(config.blockedCode, "request-block.body_blocked", nil, []byte(config.blockedMessage), -1)
 			return types.ActionContinue
 		}
 	}

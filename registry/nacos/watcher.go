@@ -26,9 +26,7 @@ import (
 	"github.com/nacos-group/nacos-sdk-go/model"
 	"github.com/nacos-group/nacos-sdk-go/vo"
 	"istio.io/api/networking/v1alpha3"
-	versionedclient "istio.io/client-go/pkg/clientset/versioned"
 	"istio.io/pkg/log"
-	ctrl "sigs.k8s.io/controller-runtime"
 
 	apiv1 "github.com/alibaba/higress/api/networking/v1"
 	"github.com/alibaba/higress/pkg/common"
@@ -58,14 +56,12 @@ type watcher struct {
 	RegistryType         provider.ServiceRegistryType `json:"registry_type"`
 	Status               provider.WatcherStatus       `json:"status"`
 	namingClient         naming_client.INamingClient
-	updateHandler        provider.ServiceUpdateHandler
-	readyHandler         provider.ReadyHandler
 	cache                memory.Cache
 	mutex                *sync.Mutex
 	stop                 chan struct{}
-	client               *versionedclient.Clientset
 	isStop               bool
 	updateCacheWhenEmpty bool
+	authOption           provider.AuthOption
 }
 
 type WatcherOption func(w *watcher)
@@ -79,18 +75,6 @@ func NewWatcher(cache memory.Cache, opts ...WatcherOption) (provider.Watcher, er
 		mutex:            &sync.Mutex{},
 		stop:             make(chan struct{}),
 	}
-
-	config, err := ctrl.GetConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	ic, err := versionedclient.NewForConfig(config)
-	if err != nil {
-		log.Errorf("can not new istio client, err:%v", err)
-		return nil, err
-	}
-	w.client = ic
 
 	w.NacosRefreshInterval = int64(DefaultRefreshInterval)
 
@@ -195,12 +179,18 @@ func WithUpdateCacheWhenEmpty(enable bool) WatcherOption {
 	}
 }
 
+func WithAuthOption(authOption provider.AuthOption) WatcherOption {
+	return func(w *watcher) {
+		w.authOption = authOption
+	}
+}
+
 func (w *watcher) Run() {
 	ticker := time.NewTicker(time.Duration(w.NacosRefreshInterval))
 	defer ticker.Stop()
 	w.Status = provider.ProbeWatcherStatus(w.Domain, strconv.FormatUint(uint64(w.Port), 10))
 	w.fetchAllServices()
-	w.readyHandler(true)
+	w.Ready(true)
 	for {
 		select {
 		case <-ticker.C:
@@ -218,7 +208,6 @@ func (w *watcher) fetchAllServices() error {
 		return nil
 	}
 	fetchedServices := make(map[string]bool)
-
 	for _, groupName := range w.NacosGroups {
 		for page := 1; ; page++ {
 			ss, err := w.namingClient.GetAllServicesInfo(vo.GetAllServiceInfoParam{
@@ -234,7 +223,7 @@ func (w *watcher) fetchAllServices() error {
 			for _, serviceName := range ss.Doms {
 				fetchedServices[groupName+DefaultJoiner+serviceName] = true
 			}
-			if ss.Count < DefaultFetchPageSize {
+			if len(ss.Doms) < DefaultFetchPageSize {
 				break
 			}
 		}
@@ -305,14 +294,14 @@ func (w *watcher) getSubscribeCallback(groupName string, serviceName string) fun
 	host := strings.Join([]string{serviceName, suffix}, common.DotSeparator)
 
 	return func(services []model.SubscribeService, err error) {
-		defer w.updateHandler()
+		defer w.UpdateService()
 
 		//log.Info("callback", "serviceName", serviceName, "suffix", suffix, "details", services)
 
 		if err != nil {
 			if strings.Contains(err.Error(), "hosts is empty") {
 				if w.updateCacheWhenEmpty {
-					w.cache.DeleteServiceEntryWrapper(host)
+					w.cache.DeleteServiceWrapper(host)
 				}
 			} else {
 				log.Errorf("callback error:%v", err)
@@ -323,17 +312,18 @@ func (w *watcher) getSubscribeCallback(groupName string, serviceName string) fun
 			return
 		}
 		serviceEntry := w.generateServiceEntry(host, services)
-		w.cache.UpdateServiceEntryWrapper(host, &memory.ServiceEntryWrapper{
+		w.cache.UpdateServiceWrapper(host, &memory.ServiceWrapper{
 			ServiceName:  serviceName,
 			ServiceEntry: serviceEntry,
 			Suffix:       suffix,
 			RegistryType: w.Type,
+			RegistryName: w.Name,
 		})
 	}
 }
 
 func (w *watcher) generateServiceEntry(host string, services []model.SubscribeService) *v1alpha3.ServiceEntry {
-	portList := make([]*v1alpha3.Port, 0)
+	portList := make([]*v1alpha3.ServicePort, 0)
 	endpoints := make([]*v1alpha3.WorkloadEntry, 0)
 
 	for _, service := range services {
@@ -343,7 +333,7 @@ func (w *watcher) generateServiceEntry(host string, services []model.SubscribeSe
 		} else {
 			service.Metadata = make(map[string]string)
 		}
-		port := &v1alpha3.Port{
+		port := &v1alpha3.ServicePort{
 			Name:     protocol.String(),
 			Number:   uint32(service.Port),
 			Protocol: protocol.String(),
@@ -385,11 +375,11 @@ func (w *watcher) Stop() {
 		suffix := strings.Join([]string{s[0], w.NacosNamespace, w.Type}, common.DotSeparator)
 		suffix = strings.ReplaceAll(suffix, common.Underscore, common.Hyphen)
 		host := strings.Join([]string{s[1], suffix}, common.DotSeparator)
-		w.cache.DeleteServiceEntryWrapper(host)
+		w.cache.DeleteServiceWrapper(host)
 	}
 	w.isStop = true
-	w.stop <- struct{}{}
-	w.readyHandler(false)
+	close(w.stop)
+	w.Ready(false)
 }
 
 func (w *watcher) IsHealthy() bool {
@@ -398,14 +388,6 @@ func (w *watcher) IsHealthy() bool {
 
 func (w *watcher) GetRegistryType() string {
 	return w.RegistryType.String()
-}
-
-func (w *watcher) AppendServiceUpdateHandler(f func()) {
-	w.updateHandler = f
-}
-
-func (w *watcher) ReadyHandler(f func(bool)) {
-	w.readyHandler = f
 }
 
 func shouldSubscribe(serviceName string) bool {

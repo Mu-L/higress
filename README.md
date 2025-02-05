@@ -1,51 +1,110 @@
+<a name="readme-top"></a>
 <h1 align="center">
     <img src="https://img.alicdn.com/imgextra/i2/O1CN01NwxLDd20nxfGBjxmZ_!!6000000006895-2-tps-960-290.png" alt="Higress" width="240" height="72.5">
   <br>
-  Next-generation Cloud Native Gateway
+  AI Gateway
 </h1>
+<h4 align="center"> AI Native API Gateway </h4>
 
-[![Build Status](https://github.com/alibaba/higress/workflows/build%20and%20codecov/badge.svg?branch=main)](https://github.com/alibaba/higress/actions)
+<div align="center">
+    
+[![Build Status](https://github.com/alibaba/higress/actions/workflows/build-and-test.yaml/badge.svg?branch=main)](https://github.com/alibaba/higress/actions)
 [![license](https://img.shields.io/github/license/alibaba/higress.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
 
-[**官网**](https://higress.io/) &nbsp; |
-&nbsp; [**文档**](https://higress.io/zh-cn/docs/overview/what-is-higress.html) &nbsp; |
-&nbsp; [**博客**](https://higress.io/zh-cn/blog/index.html) &nbsp; |
-&nbsp; [**开发指引**](https://higress.io/zh-cn/docs/dev/code.html) &nbsp; 
+<a href="https://trendshift.io/repositories/10918" target="_blank"><img src="https://trendshift.io/api/badge/repositories/10918" alt="alibaba%2Fhigress | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+</div>
+
+[**官网**](https://higress.cn/) &nbsp; |
+&nbsp; [**文档**](https://higress.cn/docs/latest/overview/what-is-higress/) &nbsp; |
+&nbsp; [**博客**](https://higress.cn/blog/) &nbsp; |
+&nbsp; [**电子书**](https://higress.cn/docs/ebook/wasm14/) &nbsp; |
+&nbsp; [**开发指引**](https://higress.cn/docs/latest/dev/architecture/) &nbsp; |
+&nbsp; [**AI插件**](https://higress.cn/plugin/) &nbsp;
+
 
 
 <p>
-   <a href="README_EN.md"> English <a/> | 中文
+   <a href="README_EN.md"> English <a/>| 中文 | <a href="README_JP.md"> 日本語 <a/> 
 </p>
 
 
-Higress 是基于阿里内部两年多的 Envoy Gateway 实践沉淀，以开源 [Istio](https://github.com/istio/istio) 与 [Envoy](https://github.com/envoyproxy/envoy) 为核心构建的下一代云原生网关。Higress 实现了安全防护网关、流量网关、微服务网关三层网关合一，可以显著降低网关的部署和运维成本。
+Higress 是一款云原生 API 网关，内核基于 Istio 和 Envoy，可以用 Go/Rust/JS 等编写 Wasm 插件，提供了数十个现成的通用插件，以及开箱即用的控制台（demo 点[这里](http://demo.higress.io/)）
 
-![arch](https://img.alicdn.com/imgextra/i4/O1CN01OgGP1728t0xeRfRYJ_!!6000000007989-0-tps-1726-1366.jpg)
+Higress 在阿里内部为解决 Tengine reload 对长连接业务有损，以及 gRPC/Dubbo 负载均衡能力不足而诞生。
+
+阿里云基于 Higress 构建了云原生 API 网关产品，为大量企业客户提供 99.99% 的网关高可用保障服务能力。
+
+Higress 基于 AI 网关能力，支撑了通义千问 APP、百炼大模型 API、机器学习 PAI 平台等 AI 业务。同时服务国内头部的 AIGC 企业（如零一万物），以及 AI 产品（如 FastGPT）
+
+![](https://img.alicdn.com/imgextra/i2/O1CN011AbR8023V8R5N0HcA_!!6000000007260-2-tps-1080-606.png)
+
 
 ## Summary
 
+- [**快速开始**](#快速开始)    
+- [**功能展示**](#功能展示)
 - [**使用场景**](#使用场景)
 - [**核心优势**](#核心优势)
-- [**Quick Start**](#quick-start)
 - [**社区**](#社区)
 
+## 快速开始
+
+Higress 只需 Docker 即可启动，方便个人开发者在本地搭建学习，或者用于搭建简易站点:
+
+```bash
+# 创建一个工作目录
+mkdir higress; cd higress
+# 启动 higress，配置文件会写到工作目录下
+docker run -d --rm --name higress-ai -v ${PWD}:/data \
+        -p 8001:8001 -p 8080:8080 -p 8443:8443  \
+        higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/all-in-one:latest
+```
+
+监听端口说明如下：
+
+- 8001 端口：Higress UI 控制台入口
+- 8080 端口：网关 HTTP 协议入口
+- 8443 端口：网关 HTTPS 协议入口
+
+**Higress 的所有 Docker 镜像都一直使用自己独享的仓库，不受 Docker Hub 境内访问受限的影响**
+
+K8s 下使用 Helm 部署等其他安装方式可以参考官网 [Quick Start 文档](https://higress.cn/docs/latest/user/quickstart/)。
+
+如果您是在云上部署，生产环境推荐使用[企业版](https://higress.io/cloud/)，开发测试可以使用下面一键部署社区版：
+
+[![Deploy on AlibabaCloud ComputeNest](https://service-info-public.oss-cn-hangzhou.aliyuncs.com/computenest.svg)](https://computenest.console.aliyun.com/service/instance/create/default?type=user&ServiceName=Higress社区版)
+
+
 ## 使用场景
+
+- **AI 网关**:
+
+  Higress 能够用统一的协议对接国内外所有 LLM 模型厂商，同时具备丰富的 AI 可观测、多模型负载均衡/fallback、AI token 流控、AI 缓存等能力：
+
+  ![](https://img.alicdn.com/imgextra/i1/O1CN01fNnhCp1cV8mYPRFeS_!!6000000003605-0-tps-1080-608.jpg)
 
 - **Kubernetes Ingress 网关**:
 
   Higress 可以作为 K8s 集群的 Ingress 入口网关, 并且兼容了大量 K8s Nginx Ingress 的注解，可以从 K8s Nginx Ingress 快速平滑迁移到 Higress。
   
   支持 [Gateway API](https://gateway-api.sigs.k8s.io/) 标准，支持用户从 Ingress API 平滑迁移到 Gateway API。
+
+  相比 ingress-nginx，资源开销大幅下降，路由变更生效速度有十倍提升：
+
+  ![](https://img.alicdn.com/imgextra/i1/O1CN01bhEtb229eeMNBWmdP_!!6000000008093-2-tps-750-547.png)
+  ![](https://img.alicdn.com/imgextra/i1/O1CN01bqRets1LsBGyitj4S_!!6000000001354-2-tps-887-489.png)
   
 - **微服务网关**:
 
   Higress 可以作为微服务网关, 能够对接多种类型的注册中心发现服务配置路由，例如 Nacos, ZooKeeper, Consul, Eureka 等。
   
   并且深度集成了 [Dubbo](https://github.com/apache/dubbo), [Nacos](https://github.com/alibaba/nacos), [Sentinel](https://github.com/alibaba/Sentinel) 等微服务技术栈，基于 Envoy C++ 网关内核的出色性能，相比传统 Java 类微服务网关，可以显著降低资源使用率，减少成本。
+
+  ![](https://img.alicdn.com/imgextra/i4/O1CN01v4ZbCj1dBjePSMZ17_!!6000000003698-0-tps-1613-926.jpg)
   
 - **安全防护网关**:
 
-  Higress 可以作为安全防护网关， 提供 WAF 的能力，并且支持多种认证鉴权策略，例如 key-auth, hmac-auth, jwt-auth, basic-auth, oidc 等。  
+  Higress 可以作为安全防护网关， 提供 WAF 的能力，并且支持多种认证鉴权策略，例如 key-auth, hmac-auth, jwt-auth, basic-auth, oidc 等。 
 
 ## 核心优势
 
@@ -53,206 +112,71 @@ Higress 是基于阿里内部两年多的 Envoy Gateway 实践沉淀，以开源
 
   脱胎于阿里巴巴2年多生产验证的内部产品，支持每秒请求量达数十万级的大规模场景。
 
-  彻底摆脱 reload 引起的流量抖动，配置变更毫秒级生效且业务无感。
-  
-- **平滑演进**
+  彻底摆脱 Nginx reload 引起的流量抖动，配置变更毫秒级生效且业务无感。对 AI 业务等长连接场景特别友好。
 
-  支持 Nacos/Zookeeper/Eureka 等多种注册中心，可以不依赖 K8s Service 进行服务发现，支持非容器架构平滑演进到云原生架构。
+- **流式处理**
 
-  支持从 Nginx Ingress Controller 平滑迁移，支持平滑过渡到 Gateway API，支持业务架构平滑演进到 ServiceMesh。
+  支持真正的完全流式处理请求/响应 Body，Wasm 插件很方便地自定义处理 SSE （Server-Sent Events）等流式协议的报文。
 
-- **兼收并蓄**
-  
-  兼容 Nginx Ingress Annotation 80%+ 的使用场景，且提供功能更丰富的 Higress Annotation 注解。
-  
-  兼容 Ingress API/Gateway API/Istio API，可以组合多种 CRD 实现流量精细化管理。
-  
+  在 AI 业务等大带宽场景下，可以显著降低内存开销。  
+    
 - **便于扩展**
   
-  提供 Wasm、Lua、进程外三种插件扩展机制，支持多语言编写插件，生效粒度支持全局级、域名级，路由级。
+  提供丰富的官方插件库，涵盖 AI、流量管理、安全防护等常用功能，满足90%以上的业务场景需求。
 
-  插件支持热更新，变更插件逻辑和配置都对流量无损。
+  主打 Wasm 插件扩展，通过沙箱隔离确保内存安全，支持多种编程语言，允许插件版本独立升级，实现流量无损热更新网关逻辑。
 
-## Quick Start
+- **安全易用**
+  
+  基于 Ingress API 和 Gateway API 标准，提供开箱即用的 UI 控制台，WAF 防护插件、IP/Cookie CC 防护插件开箱即用。
 
-- [**本地环境**](#本地环境)
-- [**生产环境**](#生产环境)
+  支持对接 Let's Encrypt 自动签发和续签免费证书，并且可以脱离 K8s 部署，一行 Docker 命令即可启动，方便个人开发者使用。
 
-### 本地环境
 
-#### 第一步、 安装 kubectl & kind
+## 功能展示
 
-**MacOS：**
+### AI 网关 Demo 展示
 
-```bash
-curl -Lo ./kubectl https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/darwin/amd64/kubectl
-# for Intel Macs
-[ $(uname -m) = x86_64 ]&& curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.17.0/kind-darwin-amd64
-# for M1 / ARM Macs
-[ $(uname -m) = arm64 ] && curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.17.0/kind-darwin-arm64
-chmod +x ./kind ./kubectl
-mv ./kind ./kubectl /some-dir-in-your-PATH/
-```
+[从 OpenAI 到其他大模型，30 秒完成迁移
+](https://www.bilibili.com/video/BV1dT421a7w7/?spm_id_from=333.788.recommend_more_video.14)
 
-**Windows 中使用 PowerShell:**
 
-```bash
-curl.exe -Lo kubectl.exe https://storage.googleapis.com/kubernetes-release/release/$(curl.exe -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/windows/amd64/kubectl.exe
-curl.exe -Lo kind-windows-amd64.exe https://kind.sigs.k8s.io/dl/v0.17.0/kind-windows-amd64
-Move-Item .\kind-windows-amd64.exe c:\some-dir-in-your-PATH\kind.exe
-Move-Item .\kubectl.exe c:\some-dir-in-your-PATH\kubectl.exe
-```
+### Higress UI 控制台
+    
+- **丰富的可观测**
 
-**Linux:**
+  提供开箱即用的可观测，Grafana&Prometheus 可以使用内置的也可对接自建的
 
-```bash
-curl -Lo ./kubectl https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl
-curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.17.0/kind-linux-amd64
-chmod +x ./kind ./kubectl
-sudo mv ./kind ./kubectl /usr/local/bin/kind
-```
+  ![](./docs/images/monitor.gif)
+    
 
-#### 第二步、 创建并启用 kind
+- **插件扩展机制**
 
-首先创建一个集群配置文件: `cluster.conf`
+  官方提供了多种插件，用户也可以[开发](./plugins/wasm-go)自己的插件，构建成 docker/oci 镜像后在控制台配置，可以实时变更插件逻辑，对流量完全无损。
 
-```yaml
-# cluster.conf
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-- role: control-plane
-  kubeadmConfigPatches:
-  - |
-    kind: InitConfiguration
-    nodeRegistration:
-      kubeletExtraArgs:
-        node-labels: "ingress-ready=true"
-  extraPortMappings:
-  - containerPort: 80
-    hostPort: 80
-    protocol: TCP
-  - containerPort: 443
-    hostPort: 443
-    protocol: TCP
-```
+  ![](./docs/images/plugin.gif)
 
-Mac & Linux 系统执行:
 
-```bash
-kind create cluster --name higress --config=cluster.conf
-kubectl config use-context kind-higress
-```
+- **多种服务发现**
 
-Windows 系统执行:
+  默认提供 K8s Service 服务发现，通过配置可以对接 Nacos/ZooKeeper 等注册中心实现服务发现，也可以基于静态 IP 或者 DNS 来发现
 
-```bash
-kind.exe create cluster --name higress --config=cluster.conf
-kubectl.exe config use-context kind-higress
-```
+  ![](./docs/images/service-source.gif)
+    
 
-#### 第三步、 安装 istio & higress
+- **域名和证书**
 
-```bash
-kubectl create ns istio-system
-helm install istio -n istio-system oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/charts/istio-local
-kubectl create ns higress-system
-helm install higress -n higress-system oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/charts/higress-local
-```
+  可以创建管理 TLS 证书，并配置域名的 HTTP/HTTPS 行为，域名策略里支持对特定域名生效插件
 
-注：helm版本需升级至**v3.8.0**及以上
+  ![](./docs/images/domain.gif)
 
-#### 第四步、 创建 Ingress 资源并测试
 
-```bash
-kubectl apply -f https://github.com/alibaba/higress/releases/download/v0.5.2/quickstart.yaml
-```
+- **丰富的路由能力**
 
-测试 Ingress 生效：
+  通过上面定义的服务发现机制，发现的服务会出现在服务列表中；创建路由时，选择域名，定义路由匹配机制，再选择目标服务进行路由；路由策略里支持对特定路由生效插件
 
-```bash
-# should output "foo"
-curl localhost/foo
-# should output "bar"
-curl localhost/bar
-```
+  ![](./docs/images/route-service.gif)
 
-#### 卸载资源
-
-```bash
-kubectl delete -f https://github.com/alibaba/higress/releases/download/v0.5.2/quickstart.yaml
-
-helm uninstall istio -n istio-system
-
-helm uninstall higress -n higress-system
-
-kubectl delete ns istio-system
-
-kubectl delete ns higress-system
-```
-
-### 生产环境
-
-#### 第一步、 安装 istio
-
-可以选择安装 higress 发行的 istio 版本:
-
-```bash
-kubectl create ns istio-system
-helm install istio -n istio-system oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/charts/istio
-```
-
-或者选择安装官方 istio 版本 (将失去部分能力，例如通过 Ingress 注解实现限流的功能):
-
-https://istio.io/latest/docs/setup/install
-
-#### 第二步、 安装 higress
-
-```bash
-kubectl create ns higress-system
-helm install higress -n higress-system oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/charts/higress 
-```
-
-#### 第三步、 创建 Ingress 资源并测试
-
-假设在 default 命名空间下已经部署了一个 test service，服务端口为 80 ，则创建下面这个 K8s Ingress
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: simple-example
-spec:
-  rules:
-  - host: foo.bar.com
-    http:
-      paths:
-      - path: /foo
-        pathType: Prefix
-        backend:
-          service:
-            name: test
-            port:
-              number: 80  
-```
-
-测试能访问到该服务：
-
-```bash
-curl "$(k get svc -n higress-system higress-gateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"/foo -H 'host: foo.bar.com'
-```
-
-#### 卸载资源
-
-```bash
-helm uninstall istio -n istio-system
-
-helm uninstall higress -n higress-system
-
-kubectl delete ns istio-system
-
-kubectl delete ns higress-system
-```
 
 ## 社区
 
@@ -260,15 +184,33 @@ kubectl delete ns higress-system
 
 如果没有 Envoy 和 Istio 的开源工作，Higress 就不可能实现，在这里向这两个项目献上最诚挚的敬意。
 
-### 联系我们
+### 交流群
 
-- Mailing list: higress@googlegroups.com
+![image](https://img.alicdn.com/imgextra/i2/O1CN01fZefEP1aPWkzG3A19_!!6000000003322-0-tps-720-405.jpg)
 
-社区交流群: 
+### 技术分享
 
-![image](https://img.alicdn.com/imgextra/i1/O1CN01d7LmWu1rMB71rfRhA_!!6000000005616-2-tps-720-405.png)
+微信公众号：
 
+![](https://img.alicdn.com/imgextra/i1/O1CN01WnQt0q1tcmqVDU73u_!!6000000005923-0-tps-258-258.jpg)
 
-开发者群：
+### 关联仓库
 
-![image](https://img.alicdn.com/imgextra/i2/O1CN010jFMgn1qTDaHqeIgH_!!6000000005496-2-tps-406-531.png)
+- Higress 控制台：https://github.com/higress-group/higress-console
+- Higress（独立运行版）：https://github.com/higress-group/higress-standalone
+
+### 贡献者
+
+<a href="https://github.com/alibaba/higress/graphs/contributors">
+  <img alt="contributors" src="https://contrib.rocks/image?repo=alibaba/higress"/>
+</a>
+
+### Star History
+
+[![Star History](https://api.star-history.com/svg?repos=alibaba/higress&type=Date)](https://star-history.com/#alibaba/higress&Date)
+
+<p align="right" style="font-size: 14px; color: #555; margin-top: 20px;">
+    <a href="#readme-top" style="text-decoration: none; color: #007bff; font-weight: bold;">
+        ↑ 返回顶部 ↑
+    </a>
+</p>

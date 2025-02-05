@@ -116,6 +116,9 @@ std::string getStringToSign() {
       getRequestHeader(CA_SIGNATURE_HEADERS)->toString();
   std::vector<std::string> header_arr;
   for (const auto& header : absl::StrSplit(dynamic_check_headers, ",")) {
+    if (header.empty()) {
+      continue;
+    }
     auto lower_header = absl::AsciiStrToLower(header);
     if (lower_header == CA_SIGNATURE || lower_header == CA_SIGNATURE_HEADERS) {
       continue;
@@ -344,13 +347,13 @@ bool PluginRootContext::checkPlugin(
         deniedInvalidDate();
         return false;
       }
-      time_offset = std::abs((long long)(timestamp - current_time));
       // milliseconds to nanoseconds
-      time_offset *= 1e6;
+      timestamp *= 1e6;
       // seconds
       if (date.size() < MILLISEC_MIN_LENGTH) {
-        time_offset *= 1e3;
+        timestamp *= 1e3;
       }
+      time_offset = std::abs((long long)(timestamp - current_time));
     }
     if (time_offset > rule.date_nano_offset) {
       LOG_DEBUG(absl::StrFormat("date expired, offset is: %u",
@@ -389,8 +392,7 @@ bool PluginRootContext::onConfigure(size_t size) {
   // Parse configuration JSON string.
   if (size > 0 && !configure(size)) {
     LOG_WARN("configuration has errors initialization will not continue.");
-    setInvalidConfig();
-    return true;
+    return false;
   }
   return true;
 }

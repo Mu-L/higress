@@ -32,13 +32,13 @@ export BUILD_WITH_CONTAINER ?= 0
 
 ifeq ($(BUILD_WITH_CONTAINER),1)
 
-# An export free of arugments in a Makefile places all variables in the Makefile into the
+# An export free of arguments in a Makefile places all variables in the Makefile into the
 # environment. This is needed to allow overrides from Makefile.overrides.mk.
 export
 
-$(shell $(shell pwd)/script/setup_env.sh)
+$(shell $(shell pwd)/tools/hack/setup_env.sh)
 
-RUN = ./script/run.sh
+RUN = ./tools/hack/run.sh
 
 MAKE_DOCKER = $(RUN) make --no-print-directory -e -f Makefile.core.mk
 
@@ -58,9 +58,9 @@ else
 # If we are not in build container, we need a workaround to get environment properly set
 # Write to file, then include
 $(shell mkdir -p out)
-$(shell $(shell pwd)/script/setup_env.sh envfile > out/.env)
+$(shell $(shell pwd)/tools/hack/setup_env.sh envfile > out/.env)
 include out/.env
-# An export free of arugments in a Makefile places all variables in the Makefile into the
+# An export free of arguments in a Makefile places all variables in the Makefile into the
 # environment. This behavior may be surprising to many that use shell often, which simply
 # displays the existing environment
 export

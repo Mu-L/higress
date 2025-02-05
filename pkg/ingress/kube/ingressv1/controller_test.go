@@ -17,10 +17,12 @@ package ingressv1
 import (
 	"testing"
 
+	"github.com/alibaba/higress/pkg/ingress/kube/common"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+	networking "istio.io/api/networking/v1alpha3"
 	v1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/alibaba/higress/pkg/ingress/kube/common"
 )
 
 func TestShouldProcessIngressUpdate(t *testing.T) {
@@ -74,5 +76,45 @@ func TestShouldProcessIngressUpdate(t *testing.T) {
 	should, _ = c.shouldProcessIngressUpdate(&ingress3)
 	if !should {
 		t.Fatal("should be true")
+	}
+}
+
+func TestGenerateHttpMatches(t *testing.T) {
+	c := controller{}
+
+	tt := []struct {
+		pathType common.PathType
+		path     string
+		expect   []*networking.HTTPMatchRequest
+	}{
+		{
+			pathType: common.Prefix,
+			path:     "/foo",
+			expect: []*networking.HTTPMatchRequest{
+				{
+					Uri: &networking.StringMatch{
+						MatchType: &networking.StringMatch_Exact{Exact: "/foo"},
+					},
+				}, {
+					Uri: &networking.StringMatch{
+						MatchType: &networking.StringMatch_Prefix{Prefix: "/foo/"},
+					},
+				},
+			},
+		},
+	}
+
+	unexportedIgnoredTypes := []interface{}{
+		networking.HTTPMatchRequest{},
+		networking.StringMatch{},
+	}
+
+	for _, testcase := range tt {
+		httpMatches := c.generateHttpMatches(testcase.pathType, testcase.path, nil)
+		for idx, httpMatch := range httpMatches {
+			if diff := cmp.Diff(httpMatch, testcase.expect[idx], cmpopts.IgnoreUnexported(unexportedIgnoredTypes...)); diff != "" {
+				t.Errorf("generateHttpMatches() mismatch (-want +got):\n%s", diff)
+			}
+		}
 	}
 }
