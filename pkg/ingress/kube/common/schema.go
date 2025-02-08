@@ -20,9 +20,10 @@ import (
 )
 
 var IngressIR = collection.NewSchemasBuilder().
-	MustAdd(collections.IstioNetworkingV1Alpha3Destinationrules).
-	MustAdd(collections.IstioNetworkingV1Alpha3Envoyfilters).
-	MustAdd(collections.IstioNetworkingV1Alpha3Gateways).
-	MustAdd(collections.IstioNetworkingV1Alpha3Serviceentries).
-	MustAdd(collections.IstioNetworkingV1Alpha3Virtualservices).
+	MustAdd(collections.DestinationRule).
+	MustAdd(collections.EnvoyFilter).
+	MustAdd(collections.Gateway).
+	MustAdd(collections.ServiceEntry).
+	MustAdd(collections.VirtualService).
+	MustAdd(collections.WasmPlugin).
 	Build()

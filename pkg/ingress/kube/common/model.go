@@ -17,8 +17,6 @@ package common
 import (
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	"istio.io/istio/pilot/pkg/model"
@@ -59,7 +57,11 @@ const (
 
 	Prefix PathType = "prefix"
 
-	Regex PathType = "regex"
+	// PrefixRegex :if PathType is PrefixRegex, then the /foo/bar/[A-Z0-9]{3} is actually ^/foo/bar/[A-Z0-9]{3}.*
+	PrefixRegex PathType = "prefixRegex"
+
+	// FullPathRegex :if PathType is FullPathRegex, then the /foo/bar/[A-Z0-9]{3} is actually ^/foo/bar/[A-Z0-9]{3}$
+	FullPathRegex PathType = "fullPathRegex"
 
 	DefaultStatusUpdateInterval = 10 * time.Second
 
@@ -74,10 +76,10 @@ var (
 	ErrNotFound = errors.New("item not found")
 
 	Schemas = collection.SchemasFor(
-		collections.IstioNetworkingV1Alpha3Virtualservices,
-		collections.IstioNetworkingV1Alpha3Gateways,
-		collections.IstioNetworkingV1Alpha3Destinationrules,
-		collections.IstioNetworkingV1Alpha3Envoyfilters,
+		collections.VirtualService,
+		collections.Gateway,
+		collections.DestinationRule,
+		collections.EnvoyFilter,
 	)
 
 	clusterPrefix    string
@@ -93,14 +95,17 @@ func init() {
 
 type Options struct {
 	Enable               bool
-	ClusterId            string
+	ClusterId            cluster.ID
 	IngressClass         string
+	GatewayClass         string
 	WatchNamespace       string
 	RawClusterId         string
 	EnableStatus         bool
 	SystemNamespace      string
 	GatewaySelectorKey   string
 	GatewaySelectorValue string
+	GatewayHttpPort      uint32
+	GatewayHttpsPort     uint32
 }
 
 type BasicAuthRules struct {
@@ -149,7 +154,8 @@ type ConvertOptions struct {
 
 	IngressDomainCache *IngressDomainCache
 
-	HostAndPath2Ingress map[string]*config.Config
+	// the host, path, headers, params of rule => ingress
+	Route2Ingress map[string]*WrapperConfigWithRuleKey
 
 	// Record valid/invalid routes from ingress
 	IngressRouteCache *IngressRouteCache
@@ -164,39 +170,6 @@ type ConvertOptions struct {
 	Service2TrafficPolicy map[ServiceKey]*WrapperTrafficPolicy
 
 	HasDefaultBackend bool
-}
-
-// CreateOptions obtain options from cluster id.
-// The cluster id format is k8sClusterId ingressClass watchNamespace EnableStatus, delimited by _.
-func CreateOptions(clusterId cluster.ID) Options {
-	parts := strings.Split(clusterId.String(), "_")
-	// Old cluster key
-	if len(parts) < 3 {
-		out := Options{
-			RawClusterId: clusterId.String(),
-		}
-		if len(parts) > 0 {
-			out.ClusterId = parts[0]
-		}
-		return out
-	}
-
-	options := Options{
-		Enable:         true,
-		ClusterId:      parts[0],
-		IngressClass:   parts[1],
-		WatchNamespace: parts[2],
-		RawClusterId:   clusterId.String(),
-		// The status switch is enabled by default.
-		EnableStatus: true,
-	}
-
-	if len(parts) == 4 {
-		if enable, err := strconv.ParseBool(parts[3]); err == nil {
-			options.EnableStatus = enable
-		}
-	}
-	return options
 }
 
 type IngressRouteCache struct {
@@ -292,7 +265,7 @@ func (i *IngressRouteCache) Extract() model.IngressRouteCollection {
 }
 
 type IngressRouteBuilder struct {
-	ClusterId   string
+	ClusterId   cluster.ID
 	RouteName   string
 	Host        string
 	PathType    string
@@ -367,7 +340,7 @@ const (
 )
 
 type IngressDomainBuilder struct {
-	ClusterId string
+	ClusterId cluster.ID
 	Host      string
 	Protocol  Protocol
 	Event     Event

@@ -15,25 +15,28 @@
 package annotations
 
 import (
+	"strings"
+
 	networking "istio.io/api/networking/v1alpha3"
-	"istio.io/istio/pilot/pkg/util/sets"
+	"istio.io/istio/pkg/cluster"
+	"istio.io/istio/pkg/util/sets"
 	listersv1 "k8s.io/client-go/listers/core/v1"
 )
 
 type GlobalContext struct {
 	// secret key is cluster/namespace/name
-	WatchedSecrets sets.Set
+	WatchedSecrets sets.Set[string]
 
-	ClusterSecretLister map[string]listersv1.SecretLister
+	ClusterSecretLister map[cluster.ID]listersv1.SecretLister
 
-	ClusterServiceList map[string]listersv1.ServiceLister
+	ClusterServiceList map[cluster.ID]listersv1.ServiceLister
 }
 
 type Meta struct {
 	Namespace    string
 	Name         string
 	RawClusterId string
-	ClusterId    string
+	ClusterId    cluster.ID
 }
 
 // Ingress defines the valid annotations present in one NGINX Ingress.
@@ -54,23 +57,50 @@ type Ingress struct {
 
 	IPAccessControl *IPAccessControlConfig
 
+	Timeout *TimeoutConfig
+
 	Retry *RetryConfig
 
 	LoadBalance *LoadBalanceConfig
+
+	localRateLimit *localRateLimitConfig
 
 	Fallback *FallbackConfig
 
 	Auth *AuthConfig
 
+	Mirror *MirrorConfig
+
 	Destination *DestinationConfig
+
+	IgnoreCase *IgnoreCaseConfig
+
+	Match *MatchConfig
+
+	HeaderControl *HeaderControlConfig
+
+	Http2Rpc *Http2RpcConfig
 }
 
-func (i *Ingress) NeedRegexMatch() bool {
+func (i *Ingress) NeedRegexMatch(path string) bool {
 	if i.Rewrite == nil {
 		return false
 	}
+	if i.Rewrite.RewriteTarget != "" && strings.ContainsAny(path, `\.+*?()|[]{}^$`) {
+		return true
+	}
+	if strings.ContainsAny(i.Rewrite.RewriteTarget, `$\`) {
+		return true
+	}
+	return i.IsPrefixRegexMatch() || i.IsFullPathRegexMatch()
+}
 
-	return i.Rewrite.RewriteTarget != "" || i.Rewrite.UseRegex
+func (i *Ingress) IsPrefixRegexMatch() bool {
+	return i.Rewrite.UseRegex
+}
+
+func (i *Ingress) IsFullPathRegexMatch() bool {
+	return i.Rewrite.FullPathRegex
 }
 
 func (i *Ingress) IsCanary() bool {
@@ -127,11 +157,18 @@ func NewAnnotationHandlerManager() AnnotationHandler {
 			rewrite{},
 			upstreamTLS{},
 			ipAccessControl{},
+			timeout{},
 			retry{},
 			loadBalance{},
+			localRateLimit{},
 			fallback{},
 			auth{},
+			mirror{},
 			destination{},
+			ignoreCaseMatching{},
+			match{},
+			headerControl{},
+			http2rpc{},
 		},
 		gatewayHandlers: []GatewayHandler{
 			downstreamTLS{},
@@ -144,8 +181,14 @@ func NewAnnotationHandlerManager() AnnotationHandler {
 			redirect{},
 			rewrite{},
 			ipAccessControl{},
+			timeout{},
 			retry{},
+			localRateLimit{},
 			fallback{},
+			mirror{},
+			ignoreCaseMatching{},
+			match{},
+			headerControl{},
 		},
 		trafficPolicyHandlers: []TrafficPolicyHandler{
 			upstreamTLS{},
@@ -180,8 +223,8 @@ func (h *AnnotationHandlerManager) ApplyRoute(route *networking.HTTPRoute, confi
 	}
 }
 
-func (h *AnnotationHandlerManager) ApplyTrafficPolicy(trafficPolicy *networking.TrafficPolicy_PortTrafficPolicy, config *Ingress) {
+func (h *AnnotationHandlerManager) ApplyTrafficPolicy(trafficPolicy *networking.TrafficPolicy, portTrafficPolicy *networking.TrafficPolicy_PortTrafficPolicy, config *Ingress) {
 	for _, handler := range h.trafficPolicyHandlers {
-		handler.ApplyTrafficPolicy(trafficPolicy, config)
+		handler.ApplyTrafficPolicy(trafficPolicy, portTrafficPolicy, config)
 	}
 }

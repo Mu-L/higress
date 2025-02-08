@@ -15,6 +15,7 @@
 package annotations
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -22,8 +23,10 @@ import (
 )
 
 const (
+	rewritePath   = "rewrite-path"
 	rewriteTarget = "rewrite-target"
 	useRegex      = "use-regex"
+	fullPathRegex = "full-path-regex"
 	upstreamVhost = "upstream-vhost"
 
 	re2Regex = "\\$[0-9]"
@@ -37,7 +40,9 @@ var (
 type RewriteConfig struct {
 	RewriteTarget string
 	UseRegex      bool
+	FullPathRegex bool
 	RewriteHost   string
+	RewritePath   string
 }
 
 type rewrite struct{}
@@ -50,13 +55,11 @@ func (r rewrite) Parse(annotations Annotations, config *Ingress, _ *GlobalContex
 	rewriteConfig := &RewriteConfig{}
 	rewriteConfig.RewriteTarget, _ = annotations.ParseStringASAP(rewriteTarget)
 	rewriteConfig.UseRegex, _ = annotations.ParseBoolASAP(useRegex)
+	rewriteConfig.FullPathRegex, _ = annotations.ParseBoolForHigress(fullPathRegex)
 	rewriteConfig.RewriteHost, _ = annotations.ParseStringASAP(upstreamVhost)
+	rewriteConfig.RewritePath, _ = annotations.ParseStringForHigress(rewritePath)
 
-	if rewriteConfig.RewriteTarget != "" {
-		// When rewrite target is present and not empty,
-		// we will enforce regex match on all rules in this ingress.
-		rewriteConfig.UseRegex = true
-
+	if rewriteConfig.RewritePath == "" && rewriteConfig.RewriteTarget != "" {
 		// We should convert nginx regex rule to envoy regex rule.
 		rewriteConfig.RewriteTarget = convertToRE2(rewriteConfig.RewriteTarget)
 	}
@@ -68,15 +71,43 @@ func (r rewrite) Parse(annotations Annotations, config *Ingress, _ *GlobalContex
 func (r rewrite) ApplyRoute(route *networking.HTTPRoute, config *Ingress) {
 	rewriteConfig := config.Rewrite
 	if rewriteConfig == nil || (rewriteConfig.RewriteTarget == "" &&
-		rewriteConfig.RewriteHost == "") {
+		rewriteConfig.RewriteHost == "" && rewriteConfig.RewritePath == "") {
 		return
 	}
 
 	route.Rewrite = &networking.HTTPRewrite{}
-	if rewriteConfig.RewriteTarget != "" {
-		route.Rewrite.UriRegex = &networking.RegexMatchAndSubstitute{
-			Pattern:      route.Match[0].Uri.GetRegex(),
-			Substitution: rewriteConfig.RewriteTarget,
+	if rewriteConfig.RewritePath != "" {
+		route.Rewrite.Uri = rewriteConfig.RewritePath
+		for _, match := range route.Match {
+			if strings.HasSuffix(match.Uri.GetPrefix(), "/") {
+				if !strings.HasSuffix(rewriteConfig.RewritePath, "/") {
+					route.Rewrite.Uri = ""
+					matchPattern := fmt.Sprintf("^%s(/.*)?", strings.TrimSuffix(match.Uri.GetPrefix(), "/"))
+					route.Rewrite.UriRegexRewrite = &networking.RegexRewrite{
+						Match:   matchPattern,
+						Rewrite: fmt.Sprintf(`%s\1`, rewriteConfig.RewritePath),
+					}
+				}
+				break
+			}
+		}
+	} else if rewriteConfig.RewriteTarget != "" {
+		uri := route.Match[0].Uri
+		if uri.GetExact() != "" {
+			route.Rewrite.UriRegexRewrite = &networking.RegexRewrite{
+				Match:   uri.GetExact(),
+				Rewrite: rewriteConfig.RewriteTarget,
+			}
+		} else if uri.GetPrefix() != "" {
+			route.Rewrite.UriRegexRewrite = &networking.RegexRewrite{
+				Match:   "^" + uri.GetPrefix(),
+				Rewrite: rewriteConfig.RewriteTarget,
+			}
+		} else {
+			route.Rewrite.UriRegexRewrite = &networking.RegexRewrite{
+				Match:   uri.GetRegex(),
+				Rewrite: rewriteConfig.RewriteTarget,
+			}
 		}
 	}
 
@@ -95,12 +126,13 @@ func convertToRE2(target string) string {
 
 func NeedRegexMatch(annotations map[string]string) bool {
 	target, _ := Annotations(annotations).ParseStringASAP(rewriteTarget)
-	regex, _ := Annotations(annotations).ParseBoolASAP(useRegex)
+	useRegex, _ := Annotations(annotations).ParseBoolASAP(useRegex)
+	fullPathRegex, _ := Annotations(annotations).ParseBoolForHigress(fullPathRegex)
 
-	return regex || target != ""
+	return useRegex || target != "" || fullPathRegex
 }
 
 func needRewriteConfig(annotations Annotations) bool {
 	return annotations.HasASAP(rewriteTarget) || annotations.HasASAP(useRegex) ||
-		annotations.HasASAP(upstreamVhost)
+		annotations.HasASAP(upstreamVhost) || annotations.HasHigress(rewritePath) || annotations.HasHigress(fullPathRegex)
 }

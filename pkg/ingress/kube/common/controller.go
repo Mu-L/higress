@@ -17,20 +17,22 @@ package common
 import (
 	"strings"
 
+	"github.com/alibaba/higress/pkg/cert"
+	"github.com/alibaba/higress/pkg/ingress/kube/annotations"
 	networking "istio.io/api/networking/v1alpha3"
 	"istio.io/istio/pilot/pkg/model"
+	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
 	gatewaytool "istio.io/istio/pkg/config/gateway"
 	listerv1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
-
-	"github.com/alibaba/higress/pkg/ingress/kube/annotations"
 )
 
 type ServiceKey struct {
-	Namespace string
-	Name      string
-	Port      int32
+	Namespace   string
+	Name        string
+	ServiceFQDN string
+	Port        int32
 }
 
 type WrapperConfig struct {
@@ -38,11 +40,25 @@ type WrapperConfig struct {
 	AnnotationsConfig *annotations.Ingress
 }
 
+type WrapperConfigWithRuleKey struct {
+	Config  *config.Config
+	RuleKey string
+}
+
 type WrapperGateway struct {
 	Gateway       *networking.Gateway
 	WrapperConfig *WrapperConfig
-	ClusterId     string
+	ClusterId     cluster.ID
 	Host          string
+}
+
+func CreateMcpServiceKey(host string, portNumber int32) ServiceKey {
+	return ServiceKey{
+		Namespace:   "mcp",
+		Name:        host,
+		ServiceFQDN: host,
+		Port:        portNumber,
+	}
 }
 
 func (w *WrapperGateway) IsHTTPS() bool {
@@ -63,13 +79,14 @@ type WrapperHTTPRoute struct {
 	HTTPRoute        *networking.HTTPRoute
 	WrapperConfig    *WrapperConfig
 	RawClusterId     string
-	ClusterId        string
+	ClusterId        cluster.ID
 	ClusterName      string
 	Host             string
 	OriginPath       string
 	OriginPathType   PathType
 	WeightTotal      int32
 	IsDefaultBackend bool
+	RuleKey          string
 }
 
 func (w *WrapperHTTPRoute) Meta() string {
@@ -92,8 +109,9 @@ type WrapperVirtualService struct {
 }
 
 type WrapperTrafficPolicy struct {
-	TrafficPolicy *networking.TrafficPolicy_PortTrafficPolicy
-	WrapperConfig *WrapperConfig
+	TrafficPolicy     *networking.TrafficPolicy
+	PortTrafficPolicy *networking.TrafficPolicy_PortTrafficPolicy
+	WrapperConfig     *WrapperConfig
 }
 
 type WrapperDestinationRule struct {
@@ -113,7 +131,7 @@ type IngressController interface {
 
 	SecretLister() listerv1.SecretLister
 
-	ConvertGateway(convertOptions *ConvertOptions, wrapper *WrapperConfig) error
+	ConvertGateway(convertOptions *ConvertOptions, wrapper *WrapperConfig, httpsCredentialConfig *cert.Config) error
 
 	ConvertHTTPRoute(convertOptions *ConvertOptions, wrapper *WrapperConfig) error
 
@@ -130,4 +148,34 @@ type IngressController interface {
 
 	// HasSynced returns true after initial cache synchronization is complete
 	HasSynced() bool
+}
+
+type KIngressController interface {
+	// RegisterEventHandler adds a handler to receive config update events for a
+	// configuration type
+	RegisterEventHandler(kind config.GroupVersionKind, handler model.EventHandler)
+
+	List() []config.Config
+
+	ServiceLister() listerv1.ServiceLister
+
+	SecretLister() listerv1.SecretLister
+
+	ConvertGateway(convertOptions *ConvertOptions, wrapper *WrapperConfig) error
+
+	ConvertHTTPRoute(convertOptions *ConvertOptions, wrapper *WrapperConfig) error
+
+	// Run until a signal is received
+	Run(stop <-chan struct{})
+
+	SetWatchErrorHandler(func(r *cache.Reflector, err error)) error
+
+	// HasSynced returns true after initial cache synchronization is complete
+	HasSynced() bool
+}
+
+type GatewayController interface {
+	model.ConfigStoreController
+
+	SetWatchErrorHandler(func(r *cache.Reflector, err error)) error
 }

@@ -19,8 +19,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tetratelabs/proxy-wasm-go-sdk/proxywasm"
-	"github.com/tetratelabs/proxy-wasm-go-sdk/proxywasm/types"
+	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm"
+	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm/types"
 	"github.com/tidwall/gjson"
 
 	"github.com/alibaba/higress/plugins/wasm-go/pkg/wrapper"
@@ -102,8 +102,6 @@ func onHttpRequestHeaders(ctx wrapper.HttpContext, config HttpCallConfig, log wr
 			defer proxywasm.ResumeHttpRequest()
 			if statusCode != http.StatusOK {
 				log.Errorf("http call failed, status: %d", statusCode)
-				proxywasm.SendHttpResponse(http.StatusInternalServerError, nil,
-					[]byte("http call failed"), -1)
 				return
 			}
 			// avoid protocol error

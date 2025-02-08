@@ -19,7 +19,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tetratelabs/proxy-wasm-go-sdk/proxywasm"
+	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm"
+	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm/types"
 	"github.com/tidwall/gjson"
 )
 
@@ -28,6 +29,8 @@ type Category int
 const (
 	Route Category = iota
 	Host
+	Service
+	RoutePrefix
 )
 
 type MatchType int
@@ -39,9 +42,11 @@ const (
 )
 
 const (
-	RULES_KEY        = "_rules_"
-	MATCH_ROUTE_KEY  = "_match_route_"
-	MATCH_DOMAIN_KEY = "_match_domain_"
+	RULES_KEY              = "_rules_"
+	MATCH_ROUTE_KEY        = "_match_route_"
+	MATCH_DOMAIN_KEY       = "_match_domain_"
+	MATCH_SERVICE_KEY      = "_match_service_"
+	MATCH_ROUTE_PREFIX_KEY = "_match_route_prefix_"
 )
 
 type HostMatcher struct {
@@ -50,10 +55,12 @@ type HostMatcher struct {
 }
 
 type RuleConfig[PluginConfig any] struct {
-	category Category
-	routes   map[string]struct{}
-	hosts    []HostMatcher
-	config   PluginConfig
+	category     Category
+	routes       map[string]struct{}
+	services     map[string]struct{}
+	routePrefixs map[string]struct{}
+	hosts        []HostMatcher
+	config       PluginConfig
 }
 
 type RuleMatcher[PluginConfig any] struct {
@@ -68,17 +75,36 @@ func (m RuleMatcher[PluginConfig]) GetMatchConfig() (*PluginConfig, error) {
 		return nil, err
 	}
 	routeName, err := proxywasm.GetProperty([]string{"route_name"})
-	if err != nil {
+	if err != nil && err != types.ErrorStatusNotFound {
+		return nil, err
+	}
+	serviceName, err := proxywasm.GetProperty([]string{"cluster_name"})
+	if err != nil && err != types.ErrorStatusNotFound {
 		return nil, err
 	}
 	for _, rule := range m.ruleConfig {
+		// category == Host
 		if rule.category == Host {
 			if m.hostMatch(rule, host) {
 				return &rule.config, nil
 			}
 		}
 		// category == Route
-		if _, ok := rule.routes[string(routeName)]; ok {
+		if rule.category == Route {
+			if _, ok := rule.routes[string(routeName)]; ok {
+				return &rule.config, nil
+			}
+		}
+		// category == RoutePrefix
+		if rule.category == RoutePrefix {
+			for routePrefix := range rule.routePrefixs {
+				if strings.HasPrefix(string(routeName), routePrefix) {
+					return &rule.config, nil
+				}
+			}
+		}
+		// category == Cluster
+		if m.serviceMatch(rule, string(serviceName)) {
 			return &rule.config, nil
 		}
 	}
@@ -89,14 +115,15 @@ func (m RuleMatcher[PluginConfig]) GetMatchConfig() (*PluginConfig, error) {
 }
 
 func (m *RuleMatcher[PluginConfig]) ParseRuleConfig(config gjson.Result,
-	parsePluginConfig func(gjson.Result, *PluginConfig) error) error {
+	parsePluginConfig func(gjson.Result, *PluginConfig) error,
+	parseOverrideConfig func(gjson.Result, PluginConfig, *PluginConfig) error) error {
 	var rules []gjson.Result
 	obj := config.Map()
 	keyCount := len(obj)
 	if keyCount == 0 {
 		// enable globally for empty config
 		m.hasGlobalConfig = true
-		return nil
+		return parsePluginConfig(config, &m.globalConfig)
 	}
 	if rulesJson, ok := obj[RULES_KEY]; ok {
 		rules = rulesJson.Array()
@@ -107,7 +134,6 @@ func (m *RuleMatcher[PluginConfig]) ParseRuleConfig(config gjson.Result,
 	if keyCount > 0 {
 		err := parsePluginConfig(config, &pluginConfig)
 		if err != nil {
-			proxywasm.LogWarnf("parse global config failed, err:%v", err)
 			globalConfigError = err
 		} else {
 			m.globalConfig = pluginConfig
@@ -121,22 +147,37 @@ func (m *RuleMatcher[PluginConfig]) ParseRuleConfig(config gjson.Result,
 		return fmt.Errorf("parse config failed, no valid rules; global config parse error:%v", globalConfigError)
 	}
 	for _, ruleJson := range rules {
-		var rule RuleConfig[PluginConfig]
-		err := parsePluginConfig(ruleJson, &rule.config)
+		var (
+			rule RuleConfig[PluginConfig]
+			err  error
+		)
+		if parseOverrideConfig != nil {
+			err = parseOverrideConfig(ruleJson, m.globalConfig, &rule.config)
+		} else {
+			err = parsePluginConfig(ruleJson, &rule.config)
+		}
 		if err != nil {
 			return err
 		}
 		rule.routes = m.parseRouteMatchConfig(ruleJson)
 		rule.hosts = m.parseHostMatchConfig(ruleJson)
+		rule.services = m.parseServiceMatchConfig(ruleJson)
+		rule.routePrefixs = m.parseRoutePrefixMatchConfig(ruleJson)
 		noRoute := len(rule.routes) == 0
 		noHosts := len(rule.hosts) == 0
-		if (noRoute && noHosts) || (!noRoute && !noHosts) {
-			return errors.New("there is only one of  '_match_route_' and '_match_domain_' can present in configuration.")
+		noService := len(rule.services) == 0
+		noRoutePrefix := len(rule.routePrefixs) == 0
+		if boolToInt(noRoute)+boolToInt(noService)+boolToInt(noHosts)+boolToInt(noRoutePrefix) != 3 {
+			return errors.New("there is only one of  '_match_route_', '_match_domain_', '_match_service_' and '_match_route_prefix_' can present in configuration.")
 		}
 		if !noRoute {
 			rule.category = Route
-		} else {
+		} else if !noHosts {
 			rule.category = Host
+		} else if !noService {
+			rule.category = Service
+		} else {
+			rule.category = RoutePrefix
 		}
 		m.ruleConfig = append(m.ruleConfig, rule)
 	}
@@ -153,6 +194,30 @@ func (m RuleMatcher[PluginConfig]) parseRouteMatchConfig(config gjson.Result) ma
 		}
 	}
 	return routes
+}
+
+func (m RuleMatcher[PluginConfig]) parseRoutePrefixMatchConfig(config gjson.Result) map[string]struct{} {
+	keys := config.Get(MATCH_ROUTE_PREFIX_KEY).Array()
+	routePrefixs := make(map[string]struct{})
+	for _, item := range keys {
+		routePrefix := item.String()
+		if routePrefix != "" {
+			routePrefixs[routePrefix] = struct{}{}
+		}
+	}
+	return routePrefixs
+}
+
+func (m RuleMatcher[PluginConfig]) parseServiceMatchConfig(config gjson.Result) map[string]struct{} {
+	keys := config.Get(MATCH_SERVICE_KEY).Array()
+	clusters := make(map[string]struct{})
+	for _, item := range keys {
+		clusterName := item.String()
+		if clusterName != "" {
+			clusters[clusterName] = struct{}{}
+		}
+	}
+	return clusters
 }
 
 func (m RuleMatcher[PluginConfig]) parseHostMatchConfig(config gjson.Result) []HostMatcher {
@@ -176,7 +241,25 @@ func (m RuleMatcher[PluginConfig]) parseHostMatchConfig(config gjson.Result) []H
 	return hostMatchers
 }
 
+func stripPortFromHost(reqHost string) string {
+	// Port removing code is inspired by
+	// https://github.com/envoyproxy/envoy/blob/v1.17.0/source/common/http/header_utility.cc#L219
+	portStart := strings.LastIndexByte(reqHost, ':')
+	if portStart != -1 {
+		// According to RFC3986 v6 address is always enclosed in "[]".
+		// section 3.2.2.
+		v6EndIndex := strings.LastIndexByte(reqHost, ']')
+		if v6EndIndex == -1 || v6EndIndex < portStart {
+			if portStart+1 <= len(reqHost) {
+				return reqHost[:portStart]
+			}
+		}
+	}
+	return reqHost
+}
+
 func (m RuleMatcher[PluginConfig]) hostMatch(rule RuleConfig[PluginConfig], reqHost string) bool {
+	reqHost = stripPortFromHost(reqHost)
 	for _, hostMatch := range rule.hosts {
 		switch hostMatch.matchType {
 		case Suffix:
@@ -193,6 +276,24 @@ func (m RuleMatcher[PluginConfig]) hostMatch(rule RuleConfig[PluginConfig], reqH
 			}
 		default:
 			return false
+		}
+	}
+	return false
+}
+
+func (m RuleMatcher[PluginConfig]) serviceMatch(rule RuleConfig[PluginConfig], serviceName string) bool {
+	parts := strings.Split(serviceName, "|")
+	if len(parts) != 4 {
+		return false
+	}
+	port := parts[1]
+	fqdn := parts[3]
+	for configServiceName := range rule.services {
+		colonIndex := strings.LastIndexByte(configServiceName, ':')
+		if colonIndex != -1 && fqdn == string(configServiceName[:colonIndex]) && port == string(configServiceName[colonIndex+1:]) {
+			return true
+		} else if fqdn == string(configServiceName) {
+			return true
 		}
 	}
 	return false

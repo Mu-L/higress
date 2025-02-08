@@ -60,15 +60,14 @@ type watcher struct {
 	RegistryType         provider.ServiceRegistryType `json:"registry_type"`
 	Status               provider.WatcherStatus       `json:"status"`
 	namingClient         naming_client.INamingClient
-	updateHandler        provider.ServiceUpdateHandler
-	readyHandler         provider.ReadyHandler
 	cache                memory.Cache
 	mutex                *sync.Mutex
 	stop                 chan struct{}
 	isStop               bool
 	addrProvider         *address.NacosAddressProvider
 	updateCacheWhenEmpty bool
-	nacosClietConfig     *constant.ClientConfig
+	nacosClientConfig    *constant.ClientConfig
+	authOption           provider.AuthOption
 }
 
 type WatcherOption func(w *watcher)
@@ -95,7 +94,7 @@ func NewWatcher(cache memory.Cache, opts ...WatcherOption) (provider.Watcher, er
 
 	log.Infof("new nacos2 watcher with config Name:%s", w.Name)
 
-	w.nacosClietConfig = constant.NewClientConfig(
+	w.nacosClientConfig = constant.NewClientConfig(
 		constant.WithTimeoutMs(DefaultNacosTimeout),
 		constant.WithLogLevel(DefaultNacosLogLevel),
 		constant.WithLogDir(DefaultNacosLogDir),
@@ -108,6 +107,8 @@ func NewWatcher(cache memory.Cache, opts ...WatcherOption) (provider.Watcher, er
 		constant.WithNamespaceId(w.NacosNamespaceId),
 		constant.WithAccessKey(w.NacosAccessKey),
 		constant.WithSecretKey(w.NacosSecretKey),
+		constant.WithUsername(w.authOption.NacosUsername),
+		constant.WithPassword(w.authOption.NacosPassword),
 	)
 
 	initTimer := time.NewTimer(DefaultInitTimeout)
@@ -128,7 +129,7 @@ func NewWatcher(cache memory.Cache, opts ...WatcherOption) (provider.Watcher, er
 	success := make(chan struct{})
 	go func() {
 		namingClient, err := clients.NewNamingClient(vo.NacosClientParam{
-			ClientConfig:  w.nacosClietConfig,
+			ClientConfig:  w.nacosClientConfig,
 			ServerConfigs: sc,
 		})
 		if err == nil {
@@ -226,6 +227,12 @@ func WithUpdateCacheWhenEmpty(enable bool) WatcherOption {
 	}
 }
 
+func WithAuthOption(authOption provider.AuthOption) WatcherOption {
+	return func(w *watcher) {
+		w.authOption = authOption
+	}
+}
+
 func (w *watcher) Run() {
 	ticker := time.NewTicker(time.Duration(w.NacosRefreshInterval))
 	defer ticker.Stop()
@@ -234,7 +241,7 @@ func (w *watcher) Run() {
 	if err != nil {
 		log.Errorf("first fetch services failed, err:%v", err)
 	} else {
-		w.readyHandler(true)
+		w.Ready(true)
 	}
 	for {
 		select {
@@ -243,7 +250,7 @@ func (w *watcher) Run() {
 			if err != nil {
 				log.Errorf("fetch services failed, err:%v", err)
 			} else {
-				w.readyHandler(true)
+				w.Ready(true)
 			}
 		case <-w.stop:
 			return
@@ -260,7 +267,7 @@ func (w *watcher) updateNacosClient() {
 				defer w.mutex.Unlock()
 				w.Domain = addr
 				namingClient, err := clients.NewNamingClient(vo.NacosClientParam{
-					ClientConfig: w.nacosClietConfig,
+					ClientConfig: w.nacosClientConfig,
 					ServerConfigs: []constant.ServerConfig{
 						*constant.NewServerConfig(addr, uint64(w.Port)),
 					},
@@ -310,7 +317,7 @@ func (w *watcher) fetchAllServices() error {
 			for _, serviceName := range ss.Doms {
 				fetchedServices[groupName+DefaultJoiner+serviceName] = true
 			}
-			if ss.Count < DefaultFetchPageSize {
+			if len(ss.Doms) < DefaultFetchPageSize {
 				break
 			}
 		}
@@ -399,14 +406,14 @@ func (w *watcher) getSubscribeCallback(groupName string, serviceName string) fun
 	host := strings.Join([]string{serviceName, suffix}, common.DotSeparator)
 
 	return func(services []model.Instance, err error) {
-		defer w.updateHandler()
+		defer w.UpdateService()
 
 		//log.Info("callback", "serviceName", serviceName, "suffix", suffix, "details", services)
 
 		if err != nil {
 			if strings.Contains(err.Error(), "hosts is empty") {
 				if w.updateCacheWhenEmpty {
-					w.cache.DeleteServiceEntryWrapper(host)
+					w.cache.DeleteServiceWrapper(host)
 				}
 			} else {
 				log.Errorf("callback error:%v", err)
@@ -418,17 +425,18 @@ func (w *watcher) getSubscribeCallback(groupName string, serviceName string) fun
 			return
 		}
 		serviceEntry := w.generateServiceEntry(host, services)
-		w.cache.UpdateServiceEntryWrapper(host, &memory.ServiceEntryWrapper{
+		w.cache.UpdateServiceWrapper(host, &memory.ServiceWrapper{
 			ServiceName:  serviceName,
 			ServiceEntry: serviceEntry,
 			Suffix:       suffix,
 			RegistryType: w.Type,
+			RegistryName: w.Name,
 		})
 	}
 }
 
 func (w *watcher) generateServiceEntry(host string, services []model.Instance) *v1alpha3.ServiceEntry {
-	portList := make([]*v1alpha3.Port, 0)
+	portList := make([]*v1alpha3.ServicePort, 0)
 	endpoints := make([]*v1alpha3.WorkloadEntry, 0)
 
 	for _, service := range services {
@@ -436,7 +444,7 @@ func (w *watcher) generateServiceEntry(host string, services []model.Instance) *
 		if service.Metadata != nil && service.Metadata["protocol"] != "" {
 			protocol = common.ParseProtocol(service.Metadata["protocol"])
 		}
-		port := &v1alpha3.Port{
+		port := &v1alpha3.ServicePort{
 			Name:     protocol.String(),
 			Number:   uint32(service.Port),
 			Protocol: protocol.String(),
@@ -477,15 +485,16 @@ func (w *watcher) Stop() {
 		}
 
 		// clean the cache
-		suffix := strings.Join([]string{s[0], w.NacosNamespace, w.Type}, common.DotSeparator)
+		suffix := strings.Join([]string{s[0], w.NacosNamespace, "nacos"}, common.DotSeparator)
 		suffix = strings.ReplaceAll(suffix, common.Underscore, common.Hyphen)
 		host := strings.Join([]string{s[1], suffix}, common.DotSeparator)
-		w.cache.DeleteServiceEntryWrapper(host)
+		w.cache.DeleteServiceWrapper(host)
 	}
 
 	w.isStop = true
-	w.stop <- struct{}{}
-	w.readyHandler(false)
+	w.namingClient.CloseClient()
+	close(w.stop)
+	w.Ready(false)
 }
 
 func (w *watcher) IsHealthy() bool {
@@ -494,14 +503,6 @@ func (w *watcher) IsHealthy() bool {
 
 func (w *watcher) GetRegistryType() string {
 	return w.RegistryType.String()
-}
-
-func (w *watcher) AppendServiceUpdateHandler(f func()) {
-	w.updateHandler = f
-}
-
-func (w *watcher) ReadyHandler(f func(bool)) {
-	w.readyHandler = f
 }
 
 func shouldSubscribe(serviceName string) bool {

@@ -18,25 +18,26 @@ import (
 	"reflect"
 	"testing"
 
-	"istio.io/istio/pilot/pkg/model"
+	"github.com/google/go-cmp/cmp"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func TestExtraSecret(t *testing.T) {
 	inputCases := []struct {
 		input  string
-		expect model.NamespacedName
+		expect types.NamespacedName
 	}{
 		{
 			input:  "test/test",
-			expect: model.NamespacedName{},
+			expect: types.NamespacedName{},
 		},
 		{
 			input:  "kubernetes-ingress://test/test",
-			expect: model.NamespacedName{},
+			expect: types.NamespacedName{},
 		},
 		{
 			input: "kubernetes-ingress://cluster/foo/bar",
-			expect: model.NamespacedName{
+			expect: types.NamespacedName{
 				Namespace: "foo",
 				Name:      "bar",
 			},
@@ -50,4 +51,36 @@ func TestExtraSecret(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSplitBySeparator(t *testing.T) {
+	testCases := []struct {
+		input  string
+		sep    string
+		expect []string
+	}{
+		{
+			input:  "a b c d",
+			sep:    " ",
+			expect: []string{"a", "b", "c", "d"},
+		},
+		{
+			input:  ".1.2.3.4.",
+			sep:    ".",
+			expect: []string{"1", "2", "3", "4"},
+		},
+		{
+			input:  "1....2....3....4",
+			sep:    ".",
+			expect: []string{"1", "2", "3", "4"},
+		},
+	}
+
+	for _, tt := range testCases {
+		got := splitBySeparator(tt.input, tt.sep)
+		if diff := cmp.Diff(tt.expect, got); diff != "" {
+			t.Errorf("TestSplitBySeparator() mismatch (-want +got):\n%s", diff)
+		}
+	}
+
 }

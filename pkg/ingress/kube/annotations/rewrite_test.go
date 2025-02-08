@@ -18,6 +18,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	networking "istio.io/api/networking/v1alpha3"
 )
 
@@ -77,16 +78,13 @@ func TestRewriteParse(t *testing.T) {
 			},
 			expect: &RewriteConfig{
 				RewriteTarget: "/test",
-				UseRegex:      true,
 			},
 		},
 		{
 			input: Annotations{
 				buildNginxAnnotationKey(rewriteTarget): "",
 			},
-			expect: &RewriteConfig{
-				UseRegex: false,
-			},
+			expect: &RewriteConfig{},
 		},
 		{
 			input: Annotations{
@@ -94,7 +92,6 @@ func TestRewriteParse(t *testing.T) {
 			},
 			expect: &RewriteConfig{
 				RewriteTarget: "/\\2/\\1",
-				UseRegex:      true,
 			},
 		},
 		{
@@ -115,13 +112,30 @@ func TestRewriteParse(t *testing.T) {
 		},
 		{
 			input: Annotations{
+				buildNginxAnnotationKey(useRegex):      "true",
+				buildNginxAnnotationKey(rewriteTarget): "/$1",
+			},
+			expect: &RewriteConfig{
+				UseRegex:      true,
+				RewriteTarget: "/\\1",
+			},
+		},
+		{
+			input: Annotations{
 				buildNginxAnnotationKey(rewriteTarget): "/$2/$1",
 				buildNginxAnnotationKey(upstreamVhost): "test.com",
 			},
 			expect: &RewriteConfig{
 				RewriteTarget: "/\\2/\\1",
-				UseRegex:      true,
 				RewriteHost:   "test.com",
+			},
+		},
+		{
+			input: Annotations{
+				buildHigressAnnotationKey(rewritePath): "/test",
+			},
+			expect: &RewriteConfig{
+				RewritePath: "/test",
 			},
 		},
 	}
@@ -184,9 +198,9 @@ func TestRewriteApplyRoute(t *testing.T) {
 					},
 				},
 				Rewrite: &networking.HTTPRewrite{
-					UriRegex: &networking.RegexMatchAndSubstitute{
-						Pattern:      "/hello",
-						Substitution: "/test",
+					UriRegexRewrite: &networking.RegexRewrite{
+						Match:   "/hello",
+						Rewrite: "/test",
 					},
 				},
 			},
@@ -233,11 +247,165 @@ func TestRewriteApplyRoute(t *testing.T) {
 					},
 				},
 				Rewrite: &networking.HTTPRewrite{
-					UriRegex: &networking.RegexMatchAndSubstitute{
-						Pattern:      "/hello",
-						Substitution: "/test",
+					UriRegexRewrite: &networking.RegexRewrite{
+						Match:   "/hello",
+						Rewrite: "/test",
 					},
 					Authority: "test.com",
+				},
+			},
+		},
+		{
+			config: &Ingress{
+				Rewrite: &RewriteConfig{
+					RewriteTarget: "/test",
+					RewritePath:   "/test",
+					RewriteHost:   "test.com",
+				},
+			},
+			input: &networking.HTTPRoute{
+				Match: []*networking.HTTPMatchRequest{
+					{
+						Uri: &networking.StringMatch{
+							MatchType: &networking.StringMatch_Regex{
+								Regex: "/hello",
+							},
+						},
+					},
+				},
+			},
+			expect: &networking.HTTPRoute{
+				Match: []*networking.HTTPMatchRequest{
+					{
+						Uri: &networking.StringMatch{
+							MatchType: &networking.StringMatch_Regex{
+								Regex: "/hello",
+							},
+						},
+					},
+				},
+				Rewrite: &networking.HTTPRewrite{
+					Uri:       "/test",
+					Authority: "test.com",
+				},
+			},
+		},
+		{
+			config: &Ingress{
+				Rewrite: &RewriteConfig{
+					RewritePath: "/test",
+				},
+			},
+			input: &networking.HTTPRoute{
+				Match: []*networking.HTTPMatchRequest{
+					{
+						Uri: &networking.StringMatch{
+							MatchType: &networking.StringMatch_Prefix{
+								Prefix: "/hello/",
+							},
+						},
+					},
+					{
+						Uri: &networking.StringMatch{
+							MatchType: &networking.StringMatch_Exact{
+								Exact: "/hello",
+							},
+						},
+					},
+				},
+			},
+			expect: &networking.HTTPRoute{
+				Match: []*networking.HTTPMatchRequest{
+					{
+						Uri: &networking.StringMatch{
+							MatchType: &networking.StringMatch_Prefix{
+								Prefix: "/hello/",
+							},
+						},
+					},
+					{
+						Uri: &networking.StringMatch{
+							MatchType: &networking.StringMatch_Exact{
+								Exact: "/hello",
+							},
+						},
+					},
+				},
+				Rewrite: &networking.HTTPRewrite{
+					UriRegexRewrite: &networking.RegexRewrite{
+						Match:   "^/hello(/.*)?",
+						Rewrite: `/test\1`,
+					},
+				},
+			},
+		},
+		{
+			config: &Ingress{
+				Rewrite: &RewriteConfig{
+					RewriteTarget: "/test",
+				},
+			},
+			input: &networking.HTTPRoute{
+				Match: []*networking.HTTPMatchRequest{
+					{
+						Uri: &networking.StringMatch{
+							MatchType: &networking.StringMatch_Exact{
+								Exact: "/exact",
+							},
+						},
+					},
+				},
+			},
+			expect: &networking.HTTPRoute{
+				Match: []*networking.HTTPMatchRequest{
+					{
+						Uri: &networking.StringMatch{
+							MatchType: &networking.StringMatch_Exact{
+								Exact: "/exact",
+							},
+						},
+					},
+				},
+				Rewrite: &networking.HTTPRewrite{
+					UriRegexRewrite: &networking.RegexRewrite{
+						Match:   "/exact",
+						Rewrite: "/test",
+					},
+				},
+			},
+		},
+		{
+			config: &Ingress{
+				Rewrite: &RewriteConfig{
+					RewriteTarget: "/test",
+				},
+			},
+			input: &networking.HTTPRoute{
+				Match: []*networking.HTTPMatchRequest{
+					{
+						Uri: &networking.StringMatch{
+							MatchType: &networking.StringMatch_Prefix{
+								Prefix: "/prefix",
+							},
+						},
+					},
+				},
+			},
+			expect: &networking.HTTPRoute{
+				Match: []*networking.HTTPMatchRequest{
+					{
+						Uri: &networking.StringMatch{
+							MatchType: &networking.StringMatch_Prefix{
+								Prefix: "/prefix",
+							},
+						},
+					},
+				},
+				Rewrite: &networking.HTTPRewrite{
+					UriRegexRewrite: &networking.RegexRewrite{
+						Match:   "^/prefix",
+						Rewrite: "/test",
+					},
 				},
 			},
 		},
@@ -246,9 +414,7 @@ func TestRewriteApplyRoute(t *testing.T) {
 	for _, inputCase := range inputCases {
 		t.Run("", func(t *testing.T) {
 			rewrite.ApplyRoute(inputCase.input, inputCase.config)
-			if !reflect.DeepEqual(inputCase.input, inputCase.expect) {
-				t.Fatal("Should be equal")
-			}
+			assert.Equal(t, inputCase.expect, inputCase.input)
 		})
 	}
 }

@@ -23,9 +23,12 @@ import (
 
 	networking "istio.io/api/networking/v1alpha3"
 	"istio.io/istio/pilot/pkg/model"
+	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/kube"
 	v1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	networkingv1beta1 "k8s.io/api/networking/v1beta1"
 	"k8s.io/apimachinery/pkg/util/version"
 
 	netv1 "github.com/alibaba/higress/client/pkg/apis/networking/v1"
@@ -36,7 +39,6 @@ func ValidateBackendResource(resource *v1.TypedLocalObjectReference) bool {
 	if resource == nil || resource.APIGroup == nil ||
 		*resource.APIGroup != netv1.SchemeGroupVersion.Group ||
 		resource.Kind != "McpBridge" || resource.Name != "default" {
-		IngressLog.Warnf("invalid mcpbridge resource: %v", resource)
 		return false
 	}
 	return true
@@ -49,13 +51,15 @@ func V1Available(client kube.Client) bool {
 
 	serverVersion, err := client.GetKubernetesVersion()
 	if err != nil {
-		return false
+		// Consider the new ingress package is available as default
+		return true
 	}
 
 	runningVersion, err := version.ParseGeneric(serverVersion.String())
 	if err != nil {
+		// Consider the new ingress package is available as default
 		IngressLog.Errorf("unexpected error parsing running Kubernetes version: %v", err)
-		return false
+		return true
 	}
 
 	return runningVersion.AtLeast(version119)
@@ -99,18 +103,18 @@ func CreateOrUpdateAnnotations(annotations map[string]string, options Options) m
 		out[key] = value
 	}
 
-	out[ClusterIdAnnotation] = options.ClusterId
+	out[ClusterIdAnnotation] = options.ClusterId.String()
 	out[RawClusterIdAnnotation] = options.RawClusterId
 	return out
 }
 
-func GetClusterId(annotations map[string]string) string {
+func GetClusterId(annotations map[string]string) cluster.ID {
 	if len(annotations) == 0 {
 		return ""
 	}
 
 	if value, exist := annotations[ClusterIdAnnotation]; exist {
-		return value
+		return cluster.ID(value)
 	}
 
 	return ""
@@ -140,17 +144,19 @@ func GetHost(annotations map[string]string) string {
 	return ""
 }
 
+// Istio requires that the name of the gateway must conform to the DNS label.
+// For details, you can view: https://github.com/istio/istio/blob/2d5c40ad5e9cceebe64106005aa38381097da2ba/pkg/config/validation/validation.go#L478
+func convertToDNSLabelValid(input string) string {
+	hasher := md5.New()
+	hasher.Write([]byte(input))
+	hash := hasher.Sum(nil)
+
+	return hex.EncodeToString(hash[4:12])
+}
+
 // CleanHost follow the format of mse-ops for host.
 func CleanHost(host string) string {
-	if host == "*" {
-		return "global"
-	}
-
-	if strings.HasPrefix(host, "*") {
-		host = strings.ReplaceAll(host, "*", "global-")
-	}
-
-	return strings.ReplaceAll(host, ".", "-")
+	return convertToDNSLabelValid(host)
 }
 
 func CreateConvertedName(items ...string) string {
@@ -170,11 +176,21 @@ func SortHTTPRoutes(routes []*WrapperHTTPRoute) {
 
 	isAllCatch := func(route *WrapperHTTPRoute) bool {
 		if route.OriginPathType == Prefix && route.OriginPath == "/" {
-			return true
+			if route.HTTPRoute.Match == nil {
+				return true
+			}
+
+			match := route.HTTPRoute.Match[0]
+			if len(match.Headers) == 0 && len(match.QueryParams) == 0 && match.Method == nil {
+				return true
+			}
 		}
 		return false
 	}
 
+	// default backend,user specified root path => path type => path length =>
+	// methods => header => query param
+	// refer https://gateway-api.sigs.k8s.io/v1alpha2/references/spec/#gateway.networking.k8s.io/v1beta1.HTTPRouteSpec
 	sort.SliceStable(routes, func(i, j int) bool {
 		// Move default backend to end
 		if isDefaultBackend(routes[i]) {
@@ -193,7 +209,27 @@ func SortHTTPRoutes(routes []*WrapperHTTPRoute) {
 		}
 
 		if routes[i].OriginPathType == routes[j].OriginPathType {
-			return len(routes[i].OriginPath) > len(routes[j].OriginPath)
+			if in, jn := len(routes[i].OriginPath), len(routes[j].OriginPath); in != jn {
+				return in > jn
+			}
+
+			match1, match2 := routes[i].HTTPRoute.Match[0], routes[j].HTTPRoute.Match[0]
+			// methods
+			if in, jn := len(match1.Method.GetRegex()), len(match2.Method.GetRegex()); in != jn {
+				if in != 0 && jn != 0 {
+					return in < jn
+				}
+				return in != 0
+			}
+			// headers
+			if in, jn := len(match1.Headers), len(match2.Headers); in != jn {
+				return in > jn
+			}
+			// query params
+			if in, jn := len(match1.QueryParams), len(match2.QueryParams); in != jn {
+				return in > jn
+			}
+			return false
 		}
 
 		if routes[i].OriginPathType == Exact {
@@ -277,12 +313,15 @@ func partMd5(raw string) string {
 	return encoded[:4] + encoded[len(encoded)-4:]
 }
 
-func GenerateUniqueRouteName(route *WrapperHTTPRoute) string {
+func GenerateUniqueRouteName(defaultNs string, route *WrapperHTTPRoute) string {
+	if route.WrapperConfig.Config.Namespace == defaultNs {
+		return route.WrapperConfig.Config.Name
+	}
 	return route.Meta()
 }
 
-func GenerateUniqueRouteNameWithSuffix(route *WrapperHTTPRoute, suffix string) string {
-	return CreateConvertedName(route.Meta(), suffix)
+func GenerateUniqueRouteNameWithSuffix(defaultNs string, route *WrapperHTTPRoute, suffix string) string {
+	return CreateConvertedName(GenerateUniqueRouteName(defaultNs, route), suffix)
 }
 
 func SplitServiceFQDN(fqdn string) (string, string, bool) {
@@ -355,5 +394,39 @@ func GetLbStatusList(svcList []*v1.Service) []v1.LoadBalancerIngress {
 	}
 
 	sort.SliceStable(lbi, SortLbIngressList(lbi))
+	return lbi
+}
+
+func SortLbIngressListV1(lbi []networkingv1.IngressLoadBalancerIngress) func(int, int) bool {
+	return func(i int, j int) bool {
+		return lbi[i].IP < lbi[j].IP
+	}
+}
+
+func GetLbStatusListV1(svcList []*v1.Service) []networkingv1.IngressLoadBalancerIngress {
+	svcIpList := getSvcIpList(svcList)
+	lbi := make([]networkingv1.IngressLoadBalancerIngress, 0, len(svcIpList))
+	for _, ep := range svcIpList {
+		lbi = append(lbi, networkingv1.IngressLoadBalancerIngress{IP: ep})
+	}
+
+	sort.SliceStable(lbi, SortLbIngressListV1(lbi))
+	return lbi
+}
+
+func SortLbIngressListV1Beta1(lbi []networkingv1beta1.IngressLoadBalancerIngress) func(int, int) bool {
+	return func(i int, j int) bool {
+		return lbi[i].IP < lbi[j].IP
+	}
+}
+
+func GetLbStatusListV1Beta1(svcList []*v1.Service) []networkingv1beta1.IngressLoadBalancerIngress {
+	svcIpList := getSvcIpList(svcList)
+	lbi := make([]networkingv1beta1.IngressLoadBalancerIngress, 0, len(svcIpList))
+	for _, ep := range svcIpList {
+		lbi = append(lbi, networkingv1beta1.IngressLoadBalancerIngress{IP: ep})
+	}
+
+	sort.SliceStable(lbi, SortLbIngressListV1Beta1(lbi))
 	return lbi
 }

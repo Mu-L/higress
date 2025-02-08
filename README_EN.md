@@ -1,19 +1,30 @@
+<a name="readme-top"></a>
 <h1 align="center">
     <img src="https://img.alicdn.com/imgextra/i2/O1CN01NwxLDd20nxfGBjxmZ_!!6000000006895-2-tps-960-290.png" alt="Higress" width="240" height="72.5">
   <br>
-  Next-generation Cloud Native Gateway
+  Cloud Native API Gateway
 </h1>
 
+[![Build Status](https://github.com/alibaba/higress/actions/workflows/build-and-test.yaml/badge.svg?branch=main)](https://github.com/alibaba/higress/actions)
+[![license](https://img.shields.io/github/license/alibaba/higress.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
+
+[**Official Site**](https://higress.io/en-us/) &nbsp; |
+&nbsp; [**Docs**](https://higress.io/en-us/docs/overview/what-is-higress) &nbsp; |
+&nbsp; [**Blog**](https://higress.io/en-us/blog) &nbsp; |
+&nbsp; [**Developer**](https://higress.io/en-us/docs/developers/developers_dev) &nbsp; |
+&nbsp; [**Higress in Cloud**](https://www.alibabacloud.com/product/microservices-engine?spm=higress-website.topbar.0.0.0) &nbsp;
+
+
 <p>
-   English | <a href="README.md">中文<a/>
+   English | <a href="README.md">中文<a/> | <a href="README_JP.md">日本語<a/>
 </p>
 
-Higress is a next-generation cloud-native gateway based on Alibaba's internal gateway practices. 
+Higress is a cloud-native api gateway based on Alibaba's internal gateway practices. 
 
 Powered by [Istio](https://github.com/istio/istio) and [Envoy](https://github.com/envoyproxy/envoy), Higress realizes the integration of the triple gateway architecture of traffic gateway, microservice gateway and security gateway, thereby greatly reducing the costs of deployment, operation and maintenance.
 
 <h1 align="center">
-  <img src="https://img.alicdn.com/imgextra/i1/O1CN01vnNawh26mU5C9py9w_!!6000000007704-0-tps-1726-1366.jpg" alt="Higress Architecture">
+  <img src="https://img.alicdn.com/imgextra/i1/O1CN01iO9ph825juHbOIg75_!!6000000007563-2-tps-2483-2024.png" alt="Higress Architecture">
 </h1>
 
 
@@ -21,7 +32,8 @@ Powered by [Istio](https://github.com/istio/istio) and [Envoy](https://github.co
 
 - [**Use Cases**](#use-cases)
 - [**Higress Features**](#higress-features)
-- [**Quick Start**](#quick-start)
+- [**Quick Start**](https://higress.io/en-us/docs/user/quickstart)
+- [**Community**](#community)
 - [**Thanks**](#thanks)
 
 ## Use Cases
@@ -36,7 +48,7 @@ Powered by [Istio](https://github.com/istio/istio) and [Envoy](https://github.co
 
   Higress can function as a microservice gateway, which can discovery microservices from various service registries, such as Nacos, ZooKeeper, Consul, Eureka, etc.
   
-  It deeply integrates of [Dubbo](https://github.com/apache/dubbo), [Nacos](https://github.com/alibaba/nacos), [Sentinel](https://github.com/alibaba/Sentinel) and other microservice technology stacks.
+  It deeply integrates with [Dubbo](https://github.com/apache/dubbo), [Nacos](https://github.com/alibaba/nacos), [Sentinel](https://github.com/alibaba/Sentinel) and other microservice technology stacks.
   
 - **Security gateway**:
 
@@ -44,183 +56,51 @@ Powered by [Istio](https://github.com/istio/istio) and [Envoy](https://github.co
 
 ## Higress Features
 
-   （TODO）
+- **Easy to use**
+
+  Provides one-stop gateway solutions for traffic scheduling, service management, and security protection, support Console, K8s Ingress, and Gateway API configuration methods, and also support HTTP to Dubbo protocol conversion, and easily complete protocol mapping configuration.  
   
-## Quick Start
+- **Easy to expand**
 
-- [**Local Environment**](#local-environment)
-- [**Production Environment**](#production-environment)
+  Provides Wasm, Lua, and out-of-process plug-in extension mechanisms, so that multi-language plug-in writing is no longer an obstacle. The granularity of plug-in effectiveness supports not only the global level, domain name level, but also fine-grained routing level
+  
+- **Dynamic hot update**
+  
+  Get rid of the traffic jitter caused by reload at the bottom, the configuration change takes effect in milliseconds and the business is not affected, the Wasm plug-in is hot updated and the traffic is not damaged
+  
+- **Smooth upgrade**
 
-### Local Environment
+  Compatible with 80%+ usage scenarios of Nginx Ingress Annotation, and provides more feature-rich annotations, easy to handle Nginx Ingress migration in one step
+  
+- **Security**
 
-#### step 1. install kubectl & kind
+  Provides JWT, OIDC, custom authentication and authentication, deeply integrates open-source web application firewall.
 
-**On MacOS:**
+## Community
 
-```bash
-curl -Lo ./kubectl https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/darwin/amd64/kubectl
-# for Intel Macs
-[ $(uname -m) = x86_64 ]&& curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.17.0/kind-darwin-amd64
-# for M1 / ARM Macs
-[ $(uname -m) = arm64 ] && curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.17.0/kind-darwin-arm64
-chmod +x ./kind ./kubectl
-mv ./kind ./kubectl /some-dir-in-your-PATH/
-```
-
-**On Windows in PowerShell:**
-
-```bash
-curl.exe -Lo kubectl.exe https://storage.googleapis.com/kubernetes-release/release/$(curl.exe -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/windows/amd64/kubectl.exe
-curl.exe -Lo kind-windows-amd64.exe https://kind.sigs.k8s.io/dl/v0.17.0/kind-windows-amd64
-Move-Item .\kind-windows-amd64.exe c:\some-dir-in-your-PATH\kind.exe
-Move-Item .\kubectl.exe c:\some-dir-in-your-PATH\kubectl.exe
-```
-
-**On Linux:**
-
-```bash
-curl -Lo ./kubectl https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl
-curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.17.0/kind-linux-amd64
-chmod +x ./kind ./kubectl
-sudo mv ./kind ./kubectl /usr/local/bin/kind
-```
-
-#### step 2. create kind cluster
-
-create a cluster config file: `cluster.conf`
-
-```yaml
-# cluster.conf
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-- role: control-plane
-  kubeadmConfigPatches:
-  - |
-    kind: InitConfiguration
-    nodeRegistration:
-      kubeletExtraArgs:
-        node-labels: "ingress-ready=true"
-  extraPortMappings:
-  - containerPort: 80
-    hostPort: 80
-    protocol: TCP
-  - containerPort: 443
-    hostPort: 443
-    protocol: TCP
-```
-
-Mac & Linux:
-
-```bash
-kind create cluster --name higress --config=cluster.conf
-kubectl config use-context kind-higress
-```
-
-Windows:
-
-```bash
-kind.exe create cluster --name higress --config=cluster.conf
-kubectl.exe config use-context kind-higress
-```
-
-#### step 3. install istio & higress
-
-```bash
-helm install istio -n istio-system oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/charts/istio-local
-helm install higress -n higress-system oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/charts/higress-local
-```
-Note: The helm version needs to be upgraded to **v3.8.0** and above
-#### step 4. create the ingress and test it
-
-```bash
-kubectl apply -f https://kind.sigs.k8s.io/examples/ingress/usage.yaml
-```
-
-Now verify that the ingress works
-
-```bash
-# should output "foo"
-curl localhost/foo
-# should output "bar"
-curl localhost/bar
-```
-
-#### Clean-Up
-
-```bash
-kubectl delete -f https://kind.sigs.k8s.io/examples/ingress/usage.yaml
-
-helm uninstall istio -n istio-system
-
-helm uninstall higress -n higress-system
-
-kubectl delete ns istio-system
-
-kubectl delete ns higress-system
-```
-
-### Production Environment
-
-#### step 1. install istio
-
-select higress istio:
-
-```bash
-kubectl create ns istio-system
-helm install istio -n istio-system oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/charts/istio
-```
-
-or select official istio (lose some abilities, such as using annotation to limit request rate):
-
-https://istio.io/latest/docs/setup/install
-
-#### step 2. install higress
-
-```bash
-kubectl create ns higress-system
-helm install higress -n higress-system oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/charts/higress 
-```
-
-#### step 3. create the ingress and test it
-
-for example there is a service `test` in default namespace.
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: simple-example
-spec:
-  rules:
-  - host: foo.bar.com
-    http:
-      paths:
-      - path: /foo
-        pathType: Prefix
-        backend:
-          service:
-            name: test
-            port:
-              number: 80  
-```
-
-```bash
-curl "$(k get svc -n higress-system higress-gateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"/foo -H 'host: foo.bar.com'
-```
-
-#### Clean-Up
-
-```bash
-helm uninstall istio -n istio-system
-
-helm uninstall higress -n higress-system
-
-kubectl delete ns istio-system
-
-kubectl delete ns higress-system
-```
+[Slack](https://w1689142780-euk177225.slack.com/archives/C05GEL4TGTG): to get invited go [here](https://communityinviter.com/apps/w1689142780-euk177225/higress).
 
 ### Thanks
 
-Higress would not be possible without the valuable open-source work of projects in the community. We would like to extend a special thank-you to Envoy and Istio.
+Higress would not be possible without the valuable open-source work of projects in the community. We would like to extend a special thank you to Envoy and Istio.
+
+### Related Repositories
+
+- Higress Console: https://github.com/higress-group/higress-console
+- Higress Standalone: https://github.com/higress-group/higress-standalone
+
+### Contributors
+
+<a href="https://github.com/alibaba/higress/graphs/contributors">
+  <img alt="contributors" src="https://contrib.rocks/image?repo=alibaba/higress"/>
+</a>
+
+### Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/higress&type=Date)](https://star-history.com/#alibaba/higress&Date)
+
+<p align="right" style="font-size: 14px; color: #555; margin-top: 20px;">
+    <a href="#readme-top" style="text-decoration: none; color: #007bff; font-weight: bold;">
+        ↑ Back to Top ↑
+    </a>
+</p>
