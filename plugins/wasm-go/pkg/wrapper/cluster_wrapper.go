@@ -17,11 +17,45 @@ package wrapper
 import (
 	"fmt"
 	"strings"
+
+	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm"
 )
 
 type Cluster interface {
 	ClusterName() string
 	HostName() string
+}
+
+type RouteCluster struct {
+	Host string
+}
+
+func (c RouteCluster) ClusterName() string {
+	routeName, err := proxywasm.GetProperty([]string{"cluster_name"})
+	if err != nil {
+		proxywasm.LogErrorf("get route cluster failed, err:%v", err)
+	}
+	return string(routeName)
+}
+
+func (c RouteCluster) HostName() string {
+	if c.Host != "" {
+		return c.Host
+	}
+	return GetRequestHost()
+}
+
+type TargetCluster struct {
+	Host    string
+	Cluster string
+}
+
+func (c TargetCluster) ClusterName() string {
+	return c.Cluster
+}
+
+func (c TargetCluster) HostName() string {
+	return c.Host
 }
 
 type K8sCluster struct {
@@ -109,4 +143,41 @@ func (c DnsCluster) ClusterName() string {
 
 func (c DnsCluster) HostName() string {
 	return c.Domain
+}
+
+type ConsulCluster struct {
+	ServiceName string
+	Datacenter  string
+	Port        int64
+	Host        string
+}
+
+func (c ConsulCluster) ClusterName() string {
+	tail := "consul"
+	return fmt.Sprintf("outbound|%d||%s.%s.%s",
+		c.Port, c.ServiceName, c.Datacenter, tail)
+}
+
+func (c ConsulCluster) HostName() string {
+	if c.Host != "" {
+		return c.Host
+	}
+	return c.ServiceName
+}
+
+type FQDNCluster struct {
+	FQDN string
+	Host string
+	Port int64
+}
+
+func (c FQDNCluster) ClusterName() string {
+	return fmt.Sprintf("outbound|%d||%s", c.Port, c.FQDN)
+}
+
+func (c FQDNCluster) HostName() string {
+	if c.Host != "" {
+		return c.Host
+	}
+	return c.FQDN
 }

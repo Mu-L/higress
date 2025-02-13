@@ -17,6 +17,8 @@
 package v1
 
 import (
+	"net/http"
+
 	v1 "github.com/alibaba/higress/client/pkg/apis/networking/v1"
 	"github.com/alibaba/higress/client/pkg/clientset/versioned/scheme"
 	rest "k8s.io/client-go/rest"
@@ -24,6 +26,7 @@ import (
 
 type NetworkingV1Interface interface {
 	RESTClient() rest.Interface
+	Http2RpcsGetter
 	McpBridgesGetter
 }
 
@@ -32,17 +35,37 @@ type NetworkingV1Client struct {
 	restClient rest.Interface
 }
 
+func (c *NetworkingV1Client) Http2Rpcs(namespace string) Http2RpcInterface {
+	return newHttp2Rpcs(c, namespace)
+}
+
 func (c *NetworkingV1Client) McpBridges(namespace string) McpBridgeInterface {
 	return newMcpBridges(c, namespace)
 }
 
 // NewForConfig creates a new NetworkingV1Client for the given config.
+// NewForConfig is equivalent to NewForConfigAndClient(c, httpClient),
+// where httpClient was generated with rest.HTTPClientFor(c).
 func NewForConfig(c *rest.Config) (*NetworkingV1Client, error) {
 	config := *c
 	if err := setConfigDefaults(&config); err != nil {
 		return nil, err
 	}
-	client, err := rest.RESTClientFor(&config)
+	httpClient, err := rest.HTTPClientFor(&config)
+	if err != nil {
+		return nil, err
+	}
+	return NewForConfigAndClient(&config, httpClient)
+}
+
+// NewForConfigAndClient creates a new NetworkingV1Client for the given config and http client.
+// Note the http client provided takes precedence over the configured transport values.
+func NewForConfigAndClient(c *rest.Config, h *http.Client) (*NetworkingV1Client, error) {
+	config := *c
+	if err := setConfigDefaults(&config); err != nil {
+		return nil, err
+	}
+	client, err := rest.RESTClientForConfigAndClient(&config, h)
 	if err != nil {
 		return nil, err
 	}

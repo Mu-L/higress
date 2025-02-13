@@ -106,6 +106,10 @@ func ApplyByWeight(canary, route *networking.HTTPRoute, canaryIngress *Ingress) 
 	// We will process total weight in the end.
 	route.Route = append(route.Route, canary.Route[0])
 
+	// canary route use the header control applied on itself.
+	headerControl{}.ApplyRoute(canary, canaryIngress)
+	// reset
+	canary.Route[0].FallbackClusters = nil
 	// Move route level to destination level
 	canary.Route[0].Headers = canary.Headers
 
@@ -125,46 +129,52 @@ func ApplyByHeader(canary, route *networking.HTTPRoute, canaryIngress *Ingress) 
 
 	// Inherit configuration from non-canary rule
 	route.DeepCopyInto(canary)
-	// Assign temp copied canary route match
-	canary.Match = temp.Match
 	// Assign temp copied canary route destination
 	canary.Route = temp.Route
 
 	// Modified match base on by header
 	if canaryConfig.Header != "" {
-		canary.Match[0].Headers = map[string]*networking.StringMatch{
-			canaryConfig.Header: {
-				MatchType: &networking.StringMatch_Exact{
-					Exact: "always",
-				},
-			},
-		}
-		if canaryConfig.HeaderValue != "" {
-			canary.Match[0].Headers = map[string]*networking.StringMatch{
+		for _, match := range canary.Match {
+			match.Headers = map[string]*networking.StringMatch{
 				canaryConfig.Header: {
-					MatchType: &networking.StringMatch_Regex{
-						Regex: "always|" + canaryConfig.HeaderValue,
+					MatchType: &networking.StringMatch_Exact{
+						Exact: "always",
 					},
 				},
 			}
-		} else if canaryConfig.HeaderPattern != "" {
-			canary.Match[0].Headers = map[string]*networking.StringMatch{
-				canaryConfig.Header: {
-					MatchType: &networking.StringMatch_Regex{
-						Regex: canaryConfig.HeaderPattern,
+			if canaryConfig.HeaderValue != "" {
+				match.Headers = map[string]*networking.StringMatch{
+					canaryConfig.Header: {
+						MatchType: &networking.StringMatch_Regex{
+							Regex: "always|" + canaryConfig.HeaderValue,
+						},
 					},
-				},
+				}
+			} else if canaryConfig.HeaderPattern != "" {
+				match.Headers = map[string]*networking.StringMatch{
+					canaryConfig.Header: {
+						MatchType: &networking.StringMatch_Regex{
+							Regex: ".*" + canaryConfig.HeaderPattern + ".*",
+						},
+					},
+				}
 			}
 		}
 	} else if canaryConfig.Cookie != "" {
-		canary.Match[0].Headers = map[string]*networking.StringMatch{
-			"cookie": {
-				MatchType: &networking.StringMatch_Regex{
-					Regex: "^(.\\*?;)?(" + canaryConfig.Cookie + "=always)(;.\\*)?$",
+		for _, match := range canary.Match {
+			match.Headers = map[string]*networking.StringMatch{
+				"cookie": {
+					MatchType: &networking.StringMatch_Regex{
+						Regex: "^(.*?;\\s*)?(" + canaryConfig.Cookie + "=always)(;.*)?$",
+					},
 				},
-			},
+			}
 		}
 	}
+
+	canary.Headers = nil
+	// canary route use the header control applied on itself.
+	headerControl{}.ApplyRoute(canary, canaryIngress)
 
 	// First add normal route cluster
 	canary.Route[0].FallbackClusters = append(canary.Route[0].FallbackClusters,
