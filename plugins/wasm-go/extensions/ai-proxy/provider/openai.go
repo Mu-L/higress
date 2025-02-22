@@ -2,7 +2,6 @@ package provider
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"path"
 	"strings"
@@ -58,15 +57,15 @@ func (m *openaiProviderInitializer) CreateProvider(config ProviderConfig) (Provi
 	}
 	customUrl := strings.TrimPrefix(strings.TrimPrefix(config.openaiCustomUrl, "http://"), "https://")
 	pairs := strings.SplitN(customUrl, "/", 2)
-	if len(pairs) != 2 {
-		return nil, fmt.Errorf("invalid openaiCustomUrl:%s", config.openaiCustomUrl)
+	customPath := "/"
+	if len(pairs) == 2 {
+		customPath += pairs[1]
 	}
-	customPath := "/" + pairs[1]
 	isDirectCustomPath := isDirectPath(customPath)
 	capabilities := m.DefaultCapabilities()
 	if !isDirectCustomPath {
 		for key, mapPath := range capabilities {
-			capabilities[key] = path.Join(customPath, mapPath)
+			capabilities[key] = path.Join(customPath, strings.TrimPrefix(mapPath, "/v1"))
 		}
 	}
 	config.setDefaultCapabilities(capabilities)
